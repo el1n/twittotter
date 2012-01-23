@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 use utf8;
-use lib qw();
+use lib qw(/usr/local/lib/perl);
 use vars qw($B $C);
 use List::Util qw(first max maxstr min minstr reduce shuffle sum);
 use Encode qw(encode decode);
