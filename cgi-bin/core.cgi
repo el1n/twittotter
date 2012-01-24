@@ -24,6 +24,7 @@ use constant F_PROCESS =>1 << 1;
 use constant F_FINISH =>1 << 2;
 use constant F_FAILURE =>1 << 3;
 use constant F_STATE =>F_QUEUE|F_PROCESS|F_FINISH|F_FAILURE;
+use constant F_TMPORARY =>1 << 6;
 use constant F_REGULAR =>1 << 7;
 use constant F_TWEETS =>1 << 8;
 use constant F_REPLIES =>1 << 9;
@@ -33,6 +34,7 @@ use constant F_FAVORITES =>1 << 12;
 use constant F_REPLYTO =>1 << 13;
 use constant F_RETWEETED =>1 << 14;
 use constant F_QUOTETWEETED =>1 << 15;
+use constant F_API =>F_TWEETS|F_REPLIES|F_FAVORITES|F_RETWEETED;
 use constant I_PRIORITY_LOW =>1;
 use constant I_PRIORITY_MIDIUM =>2;
 use constant I_PRIORITY_HIGH =>3;
@@ -56,6 +58,15 @@ CONSUMER_SECRET=UK2h78WjOxId8ICchBzoLIh0cgPghFb4wrorSm3k
 ACCESS_TOKEN=132426553-czlqqmICDOEfKEjpdMfsjcqOFxMnQsbjsxUoCctR
 ACCESS_TOKEN_SECRET=4RhnKsWqqlYV1U0vOWzjg2Se0CFpbLMKt8NCWnMtik
 
+LOGGEDIN_HOME_TIMELINE_COUNT=200
+LOGGEDIN_MENTIONS_COUNT=200
+LOGGEDIN_FAVORITES_COUNT=200
+LOGGEDIN_RETWEETED_BY_COUNT=200
+DEFAULT_HOME_TIMELINE_COUNT=40
+DEFAULT_MENTIONS_COUNT=0
+DEFAULT_FAVORITES_COUNT=40
+DEFAULT_RETWEETED_BY_COUNT=40
+
 [MySQL]
 HOST=localhost
 PORT=3306
@@ -76,11 +87,14 @@ CLI_QI_1=
 CLI_QI_2=INSERT `Queue` (`user_id`,`screen_name`,`order`,`priority`,`flag`) VALUES(?,?,?,?,?)
 CLI_QE_0=SELECT * FROM `Queue` LEFT JOIN `Token` ON `Queue`.`screen_name` = `Token`.`screen_name` WHERE `flag` & 1 ORDER BY `Queue`.`priority`,`Queue`.`ctime` LIMIT 0,1
 CLI_QE_1=UPDATE `Queue` SET `flag` = ?,`mtime` = CURRENT_TIMESTAMP WHERE `id` = ?
-CLI_SD_0=SELECT * FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 SALVAGE_0=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,1
 SALVAGE_1=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` ASC LIMIT 0,1
-SALVAGE_6=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_at`,`structure`,`flag`) VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `flag` = `flag` | ?
-SALVAGE_7=INSERT `Bind` (`status_id`,`referring_user_id`,`referring_user_screen_name`,`referred_user_id`,`referred_user_screen_name`,`flag`) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `flag` = `flag` | ?
+SALVAGE_2=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referred_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` DESC LIMIT 0,1
+SALVAGE_3=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referred_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` ASC LIMIT 0,1
+SALVAGE_6=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_at`,`structure`,`flag`) VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `structure` = VALUES(`structure`),`flag` = `flag` | ?
+SALVAGE_7=SELECT COUNT(*) FROM `Bind` WHERE `status_id` = ? AND (`referring_user_id` = ? OR `referring_user_screen_name` = ?) AND (`referred_user_id` = ? OR `referred_user_screen_name` = ?) AND `flag` | ? = ?
+SALVAGE_8=INSERT `Bind` (`status_id`,`referring_user_id`,`referring_user_screen_name`,`referred_user_id`,`referred_user_screen_name`,`flag`) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `flag` = `flag` | ?
+SALVAGE_9=SELECT * FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 
 CMD_QE_0=SELECT `Queue`.*,`Token`.`ACCESS_TOKEN`,`Token`.`ACCESS_TOKEN_SECRET` FROM `Queue` LEFT JOIN `Token` ON `Queue`.`screen_name` = `Token`.`screen_name` WHERE `flag` & 1 ORDER BY `Queue`.`priority`,`Queue`.`ctime` LIMIT 0,1
 CMD_QE_1=SELECT COUNT(*) FROM `Queue` WHERE `screen_name` = ? AND `order` LIKE ? AND 1 | ? AND `flag` & 1 AND 1 | ?
@@ -88,8 +102,6 @@ CMD_QE_2=INSERT `Queue` (`screen_name`,`order`,`priority`,`flag`) VALUES(?,?,?,?
 CMD_QE_3=UPDATE `Queue` SET `flag` = ? WHERE `id` = ?
 INDEX_0=INSERT `Token` (`id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE `ctime` = CURRENT_TIMESTAMP
 SHOW_0=SELECT * FROM `Queue` WHERE `screen_name` = ? ORDER BY `ctime` DESC LIMIT 0,40
-SALVAGE_2=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referred_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` DESC LIMIT 0,1
-SALVAGE_3=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referred_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` ASC LIMIT 0,1
 SALVAGE_4=SELECT ?,`status_id` FROM `Tweet` WHERE `screen_name` = ? AND `flag` & ? ORDER BY `status_id` DESC LIMIT 0,1
 SALVAGE_5=SELECT ?,`status_id` FROM `Tweet` WHERE `screen_name` = ? AND `flag` & ? ORDER BY `status_id` ASC LIMIT 0,1
 
@@ -208,7 +220,7 @@ given(shift(@ARGV)){
 				#&new_queue($user_id,$screen_name,"UPDATE.FAVORITE",I_PRIORITY_HIGH,F_FAVORITES);
 				#&new_queue($user_id,$screen_name,"SALVAGE.TIMELINE",I_PRIORITY_HIGH,F_TWEETS);
 				#&new_queue($user_id,$screen_name,"SALVAGE.MENTION",I_PRIORITY_HIGH,F_REPLIES);
-				&new_queue($user_id,$screen_name,"SALVAGE.RETWEET",I_PRIORITY_HIGH,F_REPLIES);
+				&new_queue($user_id,$screen_name,"SALVAGE.RETWEETED",I_PRIORITY_HIGH,F_RETWEETED);
 				#&new_queue($user_id,$screen_name,"SALVAGE.FAVORITE",I_PRIORITY_HIGH,F_FAVORITES);
 			}
 			return($user_id);
@@ -251,7 +263,7 @@ given(shift(@ARGV)){
 			[],
 			{
 				user_id =>$r->{user_id},
-				flag =>$r->{flag} & (F_TWEETS|F_REPLIES|F_FAVORITES|F_RETWEETED),
+				flag =>$r->{flag} & F_API,
 				axis =>{UPDATE =>1,SALVAGE =>-1}->{($r->{order} =~m/^(\w+)/o)[0]},
 			},
 		);
@@ -278,7 +290,7 @@ given(shift(@ARGV)){
 	}
 	when("--twilog"){
 		for my $structure (keys(%{XMLin(shift(@ARGV))->{tweet}})){
-			if($B->{DBT_CLI_SD_0}->execute($structure) == 0){
+			if($B->{SALVAGE_9}->execute($structure) == 0){
 				print $structure."\n";
 			}
 		}
@@ -301,6 +313,23 @@ exit(0);
 
 sub salvage
 {
+	sub bind
+	{
+		my $status_id = shift();
+		my $referring_user_id = shift();
+		my $referring_user_screen_name = shift();
+		my $referred_user_id = shift();
+		my $referred_user_screen_name = shift();
+		my $flag = shift();
+
+		if(!$B->{DBT_SALVAGE_7}->execute($status_id,$referring_user_id,$referring_user_screen_name,$referred_user_id,$referred_user_screen_name,$flag,$flag)){
+			return();
+		}elsif(!$B->{DBT_SALVAGE_8}->execute($status_id,$referring_user_id,$referring_user_screen_name,$referred_user_id,$referred_user_screen_name,$flag,$flag)){
+			return();
+		}
+		return(1);
+	}
+
 	my $q = shift();
 	my $m = shift();
 	my $d = shift();
@@ -323,10 +352,13 @@ sub salvage
 				$i = $axis ? 0 : 1;
 			}
 			when(F_REPLIES){
-				$i = $axis ? 2 : 3;
+				continue();
 			}
 			when(F_FAVORITES){
-				$i = $axis ? 4 : 5;
+				continue();
+			}
+			when(F_RETWEETED){
+				$i = $axis ? 2 : 3;
 			}
 		}
 		if($B->{DBT_SALVAGE_.$i}->execute($g,$user_id,$flag,$flag) == 0){
@@ -353,7 +385,7 @@ sub salvage
 			}
 		}
 		when(F_RETWEETED){
-			if(!($r = $B->{Net::Twitter}->retweets_of_me({&getedge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
+			if(!($r = $B->{Net::Twitter}->retweets_of_me({id =>$user_id,&getedge($user_id,$flag,$axis),count =>200,include_entities =>1}))){
 				return(-1);
 			}
 		}
@@ -363,6 +395,7 @@ sub salvage
 	}
 
 	for my $structure (@{$r}){
+		$structure->{retweeted_by} = [];
 		my $flag = $flag;
 		my @flag;
 
@@ -370,48 +403,44 @@ sub salvage
 			when(F_TWEETS){
 				if($structure->{text} =~ /^RT \@([0-9A-Za-z_]{1,15}):/o){
 					push(@flag,F_RETWEETS);
-					$B->{DBT_SALVAGE_7}->execute(
+					&bind(
 						$structure->{id},
 						$structure->{user}->{id},
 						$structure->{user}->{screen_name},
 						$structure->{retweeted_status}->{user}->{id} // undef,
 						$structure->{retweeted_status}->{user}->{screen_name} // $1,
 						$flag | F_RETWEETS,
-						$flag | F_RETWEETS,
 					);
 				}elsif($structure->{text} =~ /^(.+?)RT \@([0-9A-Za-z_]{1,15}):/o){
 					push(@flag,F_RETWEETS);
-					$B->{DBT_SALVAGE_7}->execute(
+					&bind(
 						$structure->{id},
 						$structure->{user}->{id},
 						$structure->{user}->{screen_name},
 						user_id($2),
 						$2,
 						$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR | F_QUOTETWEETS : $flag | F_QUOTETWEETS,
-						$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR | F_QUOTETWEETS : $flag | F_QUOTETWEETS,
 					);
 					for($1 =~m/\@([0-9A-Za-z_]{1,15})/go){
 						push(@flag,F_REPLYTO);
-						$B->{DBT_SALVAGE_7}->execute(
+						&bind(
 							$structure->{id},
 							$structure->{user}->{id},
 							$structure->{user}->{screen_name},
 							user_id($_),
 							$_,
-							$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR | F_REPLYTO : $flag | F_REPLYTO,
 							$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR | F_REPLYTO : $flag | F_REPLYTO,
 						);
 					}
 				}else{
 					for($structure->{text} =~m/\@([0-9A-Za-z_]{1,15})/go){
 						push(@flag,F_REPLYTO);
-						$B->{DBT_SALVAGE_7}->execute(
+						&bind(
 							$structure->{id},
 							$structure->{user}->{id},
 							$structure->{user}->{screen_name},
 							user_id($_),
 							$_,
-							$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR | F_REPLYTO : $flag | F_REPLYTO,
 							$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR | F_REPLYTO : $flag | F_REPLYTO,
 						);
 					}
@@ -420,50 +449,64 @@ sub salvage
 			when(F_REPLIES){
 				if($structure->{text} =~ /^RT \@$screen_name:/o){
 					push(@flag,F_QUOTETWEETED);
-					$B->{DBT_SALVAGE_7}->execute(
+					&bind(
 						$structure->{id},
 						$structure->{user}->{id},
 						$structure->{user}->{screen_name},
 						$user_id,
 						$screen_name,
-						$flag | F_QUOTETWEETED,
 						$flag | F_QUOTETWEETED,
 					);
 				}elsif($structure->{text} =~ /^(.+?)RT \@$screen_name:/o){
 					push(@flag,F_QUOTETWEETED);
-					$B->{DBT_SALVAGE_7}->execute(
+					&bind(
 						$structure->{id},
 						$structure->{user}->{id},
 						$structure->{user}->{screen_name},
 						$user_id,
 						$screen_name,
-						$flag | F_QUOTETWEETED,
 						$flag | F_QUOTETWEETED,
 					);
 				}else{
-					$B->{DBT_SALVAGE_7}->execute(
+					&bind(
 						$structure->{id},
 						$structure->{user}->{id},
 						$structure->{user}->{screen_name},
 						$user_id,
 						$screen_name,
-						$flag,
 						$flag,
 					);
 				}
 			}
 			when(F_FAVORITES){
-				$B->{DBT_SALVAGE_7}->execute(
+				&bind(
 					$structure->{id},
 					$user_id,
 					$screen_name,
 					$structure->{user}->{id},
 					$structure->{user}->{screen_name},
 					$flag,
-					$flag,
 				);
 			}
 			when(F_RETWEETED){
+				for my $i (0..15){
+					my $r = $B->{Net::Twitter}->retweeted_by({id =>$structure->{id},count =>200,page =>$i,include_entities =>1});
+					if(ref($r) && $#{$r} != -1){
+						for(@{$r}){
+							&bind(
+								$structure->{id},
+								$_->{id},
+								$_->{screen_name},
+								$structure->{user}->{id},
+								$structure->{user}->{screen_name},
+								$flag,
+							);
+						}
+						push(@{$structure->{retweeted_by}},@{$r});
+					}else{
+						last();
+					}
+				}
 			}
 			default{
 			}
@@ -481,7 +524,7 @@ sub salvage
 			gzip({twitter =>$structure}),
 			$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR : $flag,
 			$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR : $flag,
-		) < 1){
+		) == 0){
 			return(-1);
 		}
 	}
