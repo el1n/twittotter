@@ -1,23 +1,54 @@
 #!/usr/bin/perl
+use 5.10.1;
 use utf8;
 use lib qw(/usr/local/lib/perl);
 use vars qw($B $C);
 use List::Util qw(first max maxstr min minstr reduce shuffle sum);
 use Encode qw(encode decode);
+use Compress::Zlib;
+use Storable qw(thaw nfreeze);
 use DBI;
 use Cache::Memcached::libmemcached;
+use XML::Simple;
 use Config::Tiny;
 use BlackCurtain::Ignorance;
+use DateTime;
+use DateTime::Locale;
+use DateTime::Format::DateParse;
+use DateTime::Format::MySQL;
 use Net::Twitter;
 #use Net::Twitter::Lite;
+use constant F_NULL =>0;
+use constant F_QUEUE =>1 << 0;
+use constant F_PROCESS =>1 << 1;
+use constant F_FINISH =>1 << 2;
+use constant F_FAILURE =>1 << 3;
+use constant F_STATE =>F_QUEUE|F_PROCESS|F_FINISH|F_FAILURE;
+use constant F_REGULAR =>1 << 7;
+use constant F_TWEETS =>1 << 8;
+use constant F_REPLIES =>1 << 9;
+use constant F_RETWEETS =>1 << 10;
+use constant F_QUOTETWEETS =>1 << 11;
+use constant F_FAVORITES =>1 << 12;
+use constant F_REPLYTO =>1 << 13;
+use constant F_RETWEETED =>1 << 14;
+use constant F_QUOTETWEETED =>1 << 15;
+use constant I_PRIORITY_LOW =>1;
+use constant I_PRIORITY_MIDIUM =>2;
+use constant I_PRIORITY_HIGH =>3;
 
 INIT
 {
 	$C = Config::Tiny->read_string(<<'EOF');
-CACHE_DIR=/home/twihome2/cgi-bin/cache
-CACHE_PREFIX=log
+TIMEZONE=Asia/Tokyo
+LOCALE=ja_JP
+
+CACHE_DIR=/tmp
+CACHE_PREFIX=twittotter
 CACHE_EXPIRE=3600
-TEMPLATE=/home/twihome2/cgi-bin
+TEMPLATE=/var/www/twittotter/html
+
+LIMIT=48
 
 [Twitter]
 CONSUMER_KEY=6LRZYrSsqXyhArpkI4Bw
@@ -26,18 +57,41 @@ ACCESS_TOKEN=132426553-czlqqmICDOEfKEjpdMfsjcqOFxMnQsbjsxUoCctR
 ACCESS_TOKEN_SECRET=4RhnKsWqqlYV1U0vOWzjg2Se0CFpbLMKt8NCWnMtik
 
 [MySQL]
-HOST=127.0.0.1
+HOST=localhost
 PORT=3306
-DATABASE=twihome_test
-USERNAME=ga
-PASSWORD=CTfVBJQpQjB7AMb8
+DATABASE=twittotter
+USERNAME=root
+PASSWORD=
 
-INDEX_0=INSERT INTO `Token` (`id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE `ctime` = CURRENT_TIMESTAMP
-INDEX_1=SELECT COUNT(*) FROM `Queue` WHERE `screen_name` = ? AND `order` LIKE ? AND `flag` & 1
-INDEX_2=INSERT INTO `Queue` (`screen_name`,`order`) VALUES(?,?)
+INIT_0=SET NAMES 'utf8'
+METHOD_0=SELECT `user_id` FROM `Token` WHERE `screen_name` = ? LIMIT 0,1
+METHOD_1=SELECT `user_id` FROM `Queue` WHERE `screen_name` = ? LIMIT 0,1
+METHOD_2=SELECT `user_id` FROM `Tweet` WHERE `screen_name` = ? LIMIT 0,1
+METHOD_3=SELECT `screen_name` FROM `Token` WHERE `user_id` = ? LIMIT 0,1
+METHOD_4=SELECT `screen_name` FROM `Queue` WHERE `user_id` = ? LIMIT 0,1
+METHOD_5=SELECT `screen_name` FROM `Tweet` WHERE `user_id` = ? LIMIT 0,1
+CLI_QC_0=TRUNCATE TABLE `Queue`
+CLI_QI_0=SELECT * FROM `Queue` WHERE `user_id` = ? AND `order` LIKE ? AND `flag` & ? = ? LIMIT 0,1
+CLI_QI_1=
+CLI_QI_2=INSERT `Queue` (`user_id`,`screen_name`,`order`,`priority`,`flag`) VALUES(?,?,?,?,?)
+CLI_QE_0=SELECT * FROM `Queue` LEFT JOIN `Token` ON `Queue`.`screen_name` = `Token`.`screen_name` WHERE `flag` & 1 ORDER BY `Queue`.`priority`,`Queue`.`ctime` LIMIT 0,1
+CLI_QE_1=UPDATE `Queue` SET `flag` = ?,`mtime` = CURRENT_TIMESTAMP WHERE `id` = ?
+CLI_SD_0=SELECT * FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
+SALVAGE_0=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,1
+SALVAGE_1=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` ASC LIMIT 0,1
+SALVAGE_6=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_at`,`structure`,`flag`) VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `flag` = `flag` | ?
+SALVAGE_7=INSERT `Bind` (`status_id`,`referring_user_id`,`referring_user_screen_name`,`referred_user_id`,`referred_user_screen_name`,`flag`) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `flag` = `flag` | ?
+
+CMD_QE_0=SELECT `Queue`.*,`Token`.`ACCESS_TOKEN`,`Token`.`ACCESS_TOKEN_SECRET` FROM `Queue` LEFT JOIN `Token` ON `Queue`.`screen_name` = `Token`.`screen_name` WHERE `flag` & 1 ORDER BY `Queue`.`priority`,`Queue`.`ctime` LIMIT 0,1
+CMD_QE_1=SELECT COUNT(*) FROM `Queue` WHERE `screen_name` = ? AND `order` LIKE ? AND 1 | ? AND `flag` & 1 AND 1 | ?
+CMD_QE_2=INSERT `Queue` (`screen_name`,`order`,`priority`,`flag`) VALUES(?,?,?,? | 1)
+CMD_QE_3=UPDATE `Queue` SET `flag` = ? WHERE `id` = ?
+INDEX_0=INSERT `Token` (`id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE `ctime` = CURRENT_TIMESTAMP
 SHOW_0=SELECT * FROM `Queue` WHERE `screen_name` = ? ORDER BY `ctime` DESC LIMIT 0,40
-SALVAGE_0=SELECT ?,`id` FROM `Tweet` WHERE `screen_name` = ? AND `flag` & ? ORDER BY `created_at` ASC LIMIT 0,1
-SALVAGE_1=SELECT ?,`id` FROM `Tweet` WHERE `screen_name` = ? AND `flag` & ? ORDER BY `created_at` DESC LIMIT 0,1
+SALVAGE_2=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referred_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` DESC LIMIT 0,1
+SALVAGE_3=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referred_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` ASC LIMIT 0,1
+SALVAGE_4=SELECT ?,`status_id` FROM `Tweet` WHERE `screen_name` = ? AND `flag` & ? ORDER BY `status_id` DESC LIMIT 0,1
+SALVAGE_5=SELECT ?,`status_id` FROM `Tweet` WHERE `screen_name` = ? AND `flag` & ? ORDER BY `status_id` ASC LIMIT 0,1
 
 [Memcached]
 HOST=127.0.0.1:11211
@@ -53,24 +107,397 @@ EOF
 		Cache::Memcached =>Cache::Memcached::libmemcached->new({servers =>[split(/ /o,$C->{Memcached}->{HOST})]}),
 	};
 	for(grep(/_[0-9]$/,keys(%{$C->{MySQL}}))){
-		$B->{"STH_".$_} = $B->{DBI}->prepare($C->{MySQL}->{$_});
+		$B->{"DBT_".$_} = $B->{DBI}->prepare($C->{MySQL}->{$_});
 	}
+	$B->{DBT_INIT_0}->execute();
 }
 
-BlackCurtain::Ignorance->new(
-	[
-		[qr/./,\&cb_prepare],
-		[qr/^\/?$/,\&cb_index],
-		[qr/^\/(\w+)(?:\.([a-z]+))?(?:\/[fjr])?\/?$/,\&cb_show],
-	],
-	CGI::Session =>["driver:memcached",undef,{Memcached =>$B->{Cache::Memcached}}],
-	Text::Xslate =>[path =>[split(/ /o,$C->{_}->{TEMPLATE})],cache_dir =>$C->{_}->{CACHE_DIR}],
-)->perform();
+sub user_id
+{
+	my($screen_name) = @_;
 
+	if($B->{DBT_METHOD_0}->execute($screen_name) != 0){
+		return($B->{DBT_METHOD_0}->fetch()->[0]);
+	}elsif($B->{DBT_METHOD_1}->execute($screen_name) != 0){
+		return($B->{DBT_METHOD_1}->fetch()->[0]);
+	}elsif($B->{DBT_METHOD_2}->execute($screen_name) != 0){
+		return($B->{DBT_METHOD_2}->fetch()->[0]);
+	}
+	# needed undef, if return() DBI say ...
+	# DBD::mysql::st execute failed: called with 6 bind variables when 7 are needed
+	return(undef);
+}
+
+sub screen_name
+{
+	my($user_id) = @_;
+
+	if($B->{DBT_METHOD_3}->execute($user_id) != 0){
+		return($B->{DBT_METHOD_3}->fetch()->[0]);
+	}elsif($B->{DBT_METHOD_4}->execute($user_id) != 0){
+		return($B->{DBT_METHOD_4}->fetch()->[0]);
+	}elsif($B->{DBT_METHOD_5}->execute($user_id) != 0){
+		return($B->{DBT_METHOD_5}->fetch()->[0]);
+	}
+	return();
+}
+
+sub gzip
+{
+	return(Compress::Zlib::memGzip(nfreeze(shift())));
+}
+
+sub gunzip
+{
+	return(thaw(Compress::Zlib::memGunzip(shift())));
+}
+
+sub unpack_Structure
+{
+	my $g = shift();
+
+	$g->{structure} = gunzip($g->{structure});
+	return($g);
+}
+
+sub encode_MySQLTime
+{
+	my $DateTime = DateTime::Format::DateParse->parse_datetime(shift());
+	$DateTime->set_time_zone($C->{_}->{TIMEZONE});
+	$DateTime->set_locale(DateTime::Locale->load($C->{_}->{LOCALE}));
+	return(DateTime::Format::MySQL->format_datetime($DateTime));
+}
+
+given(shift(@ARGV)){
+	when("-qc"){
+		printf("%s() : %d\n",$_,$B->{DBT_CLI_QC_0}->execute());
+	}
+	when("-qi"){
+		sub get_queue
+		{
+			my $user_id = shift();
+			my $order = shift() // "%";
+			my $flag = shift() | F_QUEUE;
+
+			if($B->{DBT_CLI_QI_0}->execute($user_id,$order,$flag,$flag) == 0){
+				return();
+			}
+			return($B->{DBT_CLI_QI_0}->fetchrow_array());
+		}
+		sub new_queue
+		{
+			my $user_id = shift();
+			my $screen_name = shift() // screen_name($user_id);
+			my $order = shift() // "UNKNOWN.".uc((caller(0))[3]);
+			my $priority = shift() // I_PRIORITY_MIDIUM;
+			my $flag = shift() | F_QUEUE;
+
+			if(!&get_queue($user_id,$order,$flag) && !$B->{DBT_CLI_QI_2}->execute($user_id,$screen_name,$order,$priority,$flag)){
+				return();
+			}
+			return(1);
+		}
+		sub ini_queue
+		{
+			my $screen_name = shift();
+			my $user_id = user_id($screen_name);
+
+			if($user_id){
+				#&new_queue($user_id,$screen_name,"UPDATE.TIMELINE",I_PRIORITY_HIGH,F_TWEETS);
+				#&new_queue($user_id,$screen_name,"UPDATE.MENTION",I_PRIORITY_HIGH,F_REPLIES);
+				#&new_queue($user_id,$screen_name,"UPDATE.FAVORITE",I_PRIORITY_HIGH,F_FAVORITES);
+				#&new_queue($user_id,$screen_name,"SALVAGE.TIMELINE",I_PRIORITY_HIGH,F_TWEETS);
+				#&new_queue($user_id,$screen_name,"SALVAGE.MENTION",I_PRIORITY_HIGH,F_REPLIES);
+				&new_queue($user_id,$screen_name,"SALVAGE.RETWEET",I_PRIORITY_HIGH,F_REPLIES);
+				#&new_queue($user_id,$screen_name,"SALVAGE.FAVORITE",I_PRIORITY_HIGH,F_FAVORITES);
+			}
+			return($user_id);
+		}
+
+		printf("%s() : %d\n",$_,&ini_queue(@ARGV));
+	}
+	when("-ql"){
+	}
+	when("-qe"){
+		sub mod_queue
+		{
+			my $id = shift();
+			my $flag = shift();
+
+			if($B->{DBT_CLI_QE_1}->execute($flag,$id) == 0){
+				return();
+			}
+			return(1);
+		}
+
+		if($B->{DBT_CLI_QE_0}->execute() == 0){
+			#return();
+			exit(0);
+		}
+		my $r = $B->{DBT_CLI_QE_0}->fetchrow_hashref();
+
+		local %SES;
+		@SES{qw(user_id screen_name ACCESS_TOKEN ACCESS_TOKEN_SECRET)} = @{$r}{qw(user_id screen_name ACCESS_TOKEN ACCESS_TOKEN_SECRET)};
+
+		&cb_prepare(
+			[],
+			[],
+			[],
+			{},
+		);
+		my $i = &salvage(
+			[$r->{screen_name}],
+			[$r->{screen_name}],
+			[],
+			{
+				user_id =>$r->{user_id},
+				flag =>$r->{flag} & (F_TWEETS|F_REPLIES|F_FAVORITES|F_RETWEETED),
+				axis =>{UPDATE =>1,SALVAGE =>-1}->{($r->{order} =~m/^(\w+)/o)[0]},
+			},
+		);
+
+		$r->{priority} = I_PRIORITY_MIDIUM;
+		if($i > 1){
+			&mod_queue($r->{id},($r->{flag} & ~F_STATE) | F_FINISH);
+			&new_queue(@{$r}{qw(user_id screen_name order priority flag)});
+		}elsif($i == 1){
+			&mod_queue($r->{id},($r->{flag} & ~F_STATE) | F_FINISH);
+		}else{
+			&mod_queue($r->{id},($r->{flag} & ~F_STATE) | F_FAILURE);
+			&new_queue(@{$r}{qw(user_id screen_name order priority flag)});
+		}
+
+		printf("[Queue%d] Salvaged %d tweets.\n",$r->{id},$i);
+	}
+	when("-sd"){
+		if($B->{DBT_CLI_SD_0}->execute(shift(@ARGV)) == 0){
+			#return();
+			die();
+		}
+		print Data::Dumper::Dumper(unpack_Structure($B->{DBT_CLI_SD_0}->fetchrow_hashref()));
+	}
+	when("--twilog"){
+		for my $structure (keys(%{XMLin(shift(@ARGV))->{tweet}})){
+			if($B->{DBT_CLI_SD_0}->execute($structure) == 0){
+				print $structure."\n";
+			}
+		}
+	}
+	when(""){
+		BlackCurtain::Ignorance->new(
+			[
+				[qr/./,\&cb_prepare],
+				[qr/^\/?$/,\&cb_index],
+				[qr/^\/(\w+)(?:\.([a-z]+))?(?:\/[fjr])?\/?$/,\&cb_show],
+			],
+			CGI::Session =>["driver:memcached",undef,{Memcached =>$B->{Cache::Memcached}}],
+			Text::Xslate =>[path =>[split(/ /o,$C->{_}->{TEMPLATE})],cache_dir =>$C->{_}->{CACHE_DIR}],
+		)->perform();
+	}
+	default{
+	}
+}
 exit(0);
+
+sub salvage
+{
+	my $q = shift();
+	my $m = shift();
+	my $d = shift();
+	my $g = shift();
+	my($screen_name) = @{$q};
+	my($screen_name,$issue) = @{$m};
+	my($user_id,$flag,$axis) = @{$g}{qw(user_id flag axis)};
+	$user_id //= user_id($screen_name);
+
+	sub getedge
+	{
+		my $user_id = shift();
+		my $flag = shift();
+		my $axis = shift() >= 0 ? 1 : 0;
+
+		my $g = $axis ? "since_id" : "max_id";
+		my $i;
+		given($flag){
+			when(F_TWEETS){
+				$i = $axis ? 0 : 1;
+			}
+			when(F_REPLIES){
+				$i = $axis ? 2 : 3;
+			}
+			when(F_FAVORITES){
+				$i = $axis ? 4 : 5;
+			}
+		}
+		if($B->{DBT_SALVAGE_.$i}->execute($g,$user_id,$flag,$flag) == 0){
+			return();
+		}
+		return($B->{DBT_SALVAGE_.$i}->fetchrow_array());
+	}
+
+	my $r = [];
+	given($flag){
+		when(F_TWEETS){
+			if(!($r = $B->{Net::Twitter}->user_timeline({id =>$user_id,&getedge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
+				return(-1);
+			}
+		}
+		when(F_REPLIES){
+			if(!($r = $B->{Net::Twitter}->mentions({id =>$user_id,&getedge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
+				return(-1);
+			}
+		}
+		when(F_FAVORITES){
+			if(!($r = $B->{Net::Twitter}->favorites({id =>$user_id,&getedge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
+				return(-1);
+			}
+		}
+		when(F_RETWEETED){
+			if(!($r = $B->{Net::Twitter}->retweets_of_me({&getedge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
+				return(-1);
+			}
+		}
+		default{
+			return(-1);
+		}
+	}
+
+	for my $structure (@{$r}){
+		my $flag = $flag;
+		my @flag;
+
+		given($flag){
+			when(F_TWEETS){
+				if($structure->{text} =~ /^RT \@([0-9A-Za-z_]{1,15}):/o){
+					push(@flag,F_RETWEETS);
+					$B->{DBT_SALVAGE_7}->execute(
+						$structure->{id},
+						$structure->{user}->{id},
+						$structure->{user}->{screen_name},
+						$structure->{retweeted_status}->{user}->{id} // undef,
+						$structure->{retweeted_status}->{user}->{screen_name} // $1,
+						$flag | F_RETWEETS,
+						$flag | F_RETWEETS,
+					);
+				}elsif($structure->{text} =~ /^(.+?)RT \@([0-9A-Za-z_]{1,15}):/o){
+					push(@flag,F_RETWEETS);
+					$B->{DBT_SALVAGE_7}->execute(
+						$structure->{id},
+						$structure->{user}->{id},
+						$structure->{user}->{screen_name},
+						user_id($2),
+						$2,
+						$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR | F_QUOTETWEETS : $flag | F_QUOTETWEETS,
+						$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR | F_QUOTETWEETS : $flag | F_QUOTETWEETS,
+					);
+					for($1 =~m/\@([0-9A-Za-z_]{1,15})/go){
+						push(@flag,F_REPLYTO);
+						$B->{DBT_SALVAGE_7}->execute(
+							$structure->{id},
+							$structure->{user}->{id},
+							$structure->{user}->{screen_name},
+							user_id($_),
+							$_,
+							$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR | F_REPLYTO : $flag | F_REPLYTO,
+							$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR | F_REPLYTO : $flag | F_REPLYTO,
+						);
+					}
+				}else{
+					for($structure->{text} =~m/\@([0-9A-Za-z_]{1,15})/go){
+						push(@flag,F_REPLYTO);
+						$B->{DBT_SALVAGE_7}->execute(
+							$structure->{id},
+							$structure->{user}->{id},
+							$structure->{user}->{screen_name},
+							user_id($_),
+							$_,
+							$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR | F_REPLYTO : $flag | F_REPLYTO,
+							$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR | F_REPLYTO : $flag | F_REPLYTO,
+						);
+					}
+				}
+			}
+			when(F_REPLIES){
+				if($structure->{text} =~ /^RT \@$screen_name:/o){
+					push(@flag,F_QUOTETWEETED);
+					$B->{DBT_SALVAGE_7}->execute(
+						$structure->{id},
+						$structure->{user}->{id},
+						$structure->{user}->{screen_name},
+						$user_id,
+						$screen_name,
+						$flag | F_QUOTETWEETED,
+						$flag | F_QUOTETWEETED,
+					);
+				}elsif($structure->{text} =~ /^(.+?)RT \@$screen_name:/o){
+					push(@flag,F_QUOTETWEETED);
+					$B->{DBT_SALVAGE_7}->execute(
+						$structure->{id},
+						$structure->{user}->{id},
+						$structure->{user}->{screen_name},
+						$user_id,
+						$screen_name,
+						$flag | F_QUOTETWEETED,
+						$flag | F_QUOTETWEETED,
+					);
+				}else{
+					$B->{DBT_SALVAGE_7}->execute(
+						$structure->{id},
+						$structure->{user}->{id},
+						$structure->{user}->{screen_name},
+						$user_id,
+						$screen_name,
+						$flag,
+						$flag,
+					);
+				}
+			}
+			when(F_FAVORITES){
+				$B->{DBT_SALVAGE_7}->execute(
+					$structure->{id},
+					$user_id,
+					$screen_name,
+					$structure->{user}->{id},
+					$structure->{user}->{screen_name},
+					$flag,
+					$flag,
+				);
+			}
+			when(F_RETWEETED){
+			}
+			default{
+			}
+		}
+
+		for(@flag){
+			$flag |= $_;
+		}
+		if($B->{DBT_SALVAGE_6}->execute(
+			$structure->{id},
+			$structure->{user}->{id},
+			$structure->{user}->{screen_name},
+			$structure->{text},
+			encode_MySQLTime($structure->{created_at}),
+			gzip({twitter =>$structure}),
+			$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR : $flag,
+			$structure->{user}->{id} eq $user_id ? $flag | F_REGULAR : $flag,
+		) < 1){
+			return(-1);
+		}
+	}
+
+	return($#{$r} + 1);
+}
 
 sub cb_prepare
 {
+	my $q = shift();
+	my $m = shift();
+	my $d = shift();
+	my $g = shift();
+	my($screen_name,$page) = @{$q};
+	my($screen_name,$issue) = @{$m};
+
 	if($SES{ACCESS_TOKEN} && $SES{ACCESS_TOKEN_SECRET}){
 		$B->{Net::Twitter} = Net::Twitter->new(
 			traits =>[qw(API::REST API::Search OAuth WrapError RetryOnError)],
@@ -94,6 +521,13 @@ sub cb_prepare
 	return();
 }
 
+__END__
+
+	}
+}
+exit(0);
+
+
 sub cb_index
 {
 	if(!defined($GET{op})){
@@ -111,25 +545,14 @@ EOF
 		$B->{Net::Twitter}->request_token_secret($SES{REQUEST_TOKEN_SECRET});
 		@SES{qw(ACCESS_TOKEN ACCESS_TOKEN_SECRET id screen_name)} = $B->{Net::Twitter}->request_access_token(token =>$GET{oauth_token},verifier =>$GET{oauth_verifier});
 		if($SES{id} > 0){
-			sub set_queue
-			{
-				if(!$B->{STH_INDEX_1}->execute(@_)){
-					warn(sprintf("%s() : %s",(caller(0))[3]),"");
-					return();
-				}elsif(($B->{STH_INDEX_1}->fetchrow_array())[0] == 0 && $B->{STH_INDEX_2}->execute(@_) == 0){
-					warn(sprintf("%s() : %s",(caller(0))[3]),"");
-					return();
-				}
-				return(1);
-			}
 			if($B->{STH_INDEX_0}->execute(@SES{qw(id screen_name ACCESS_TOKEN ACCESS_TOKEN_SECRET)}) == 0){
-				return(&cb_exception(undef,undef,undef,"認証失敗"));
-			}elsif(!&set_queue($SES{screen_name},"SALVAGE.TIMELINE")){
-				return(&cb_exception(undef,undef,undef,"認証失敗"));
-			}elsif(!&set_queue($SES{screen_name},"SALVAGE.MENTION")){
-				return(&cb_exception(undef,undef,undef,"認証失敗"));
-			}elsif(!&set_queue($SES{screen_name},"SALVAGE.FAVORITE")){
-				return(&cb_exception(undef,undef,undef,"認証失敗"));
+				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
+			}elsif(!&new_queue($SES{screen_name},"SALVAGE.TIMELINE",I_PRIORITY_MIDIUM,F_QUEUE|F_TWEETS)){
+				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
+			}elsif(!&new_queue($SES{screen_name},"SALVAGE.MENTION",I_PRIORITY_MIDIUM,F_QUEUE|F_REPLIES)){
+				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
+			}elsif(!&new_queue($SES{screen_name},"SALVAGE.FAVORITE",I_PRIORITY_MIDIUM,F_QUEUE|F_FAVORITES)){
+				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
 			}
 			return("jump","http://".$ENV{HTTP_HOST}.$ENV{SCRIPT_NAME}."/".$SES{screen_name});
 		}else{
@@ -156,7 +579,7 @@ sub cb_show
 	my($screen_name,$page) = @{$q};
 	my($screen_name,$issue) = @{$m};
 
-	my $r;
+	my $r = {};
 	my $sign = join(".",$C->{_}->{CACHE_PREFIX},$screen_name).".";
 	if(!defined($r = $B->{Cache::Memcached}->get($sign."profile"))){
 		if(!($r = $B->{Net::Twitter}->show_user({screen_name =>$screen_name}))){
@@ -167,10 +590,10 @@ sub cb_show
 
 	if(!defined($page)){
 		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."timeline"))){
-			if(!($r->{status} = &salvage(undef,$m,undef,[2,1]))){
-				return(&cb_exception(undef,undef,undef,"ユーザ情報取得失敗"));
-			}
-			$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
+			#if(!($r->{status} = &salvage(undef,$m,undef,[2,1]))){
+			#	return(&cb_exception(undef,undef,undef,"ユーザ情報取得失敗"));
+			#}
+			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
 		}
 	}elsif($page eq "j"){
 		if($B->{STH_SHOW_0}->execute($r->{screen_name})){
@@ -181,7 +604,7 @@ sub cb_show
 	return($issue ? $issue : "Text::Xslate",$r,data =><<'EOF');
 <html>
 <head>
-<title>ろぐとるだけったー</title>
+<title>ついっとったー</title>
 <style type="text/css">
 body
 {
@@ -277,502 +700,3 @@ th,td
 </html>
 EOF
 }
-
-sub salvage
-{
-	my $q = shift();
-	my $m = shift();
-	my $d = shift();
-	my $g = shift();
-	my($screen_name) = @{$q};
-	my($screen_name,$issue) = @{$m};
-	my($flag,$axis) = @{$g};
-
-	my $r;
-	if($flag & 1){
-	}elsif($flag & 2){
-		my @g;
-		if($axis){
-			if(!$B->{STH_SALVAGE_0}->execute("since_id",$screen_name,$flag)){
-			}
-			@g = $B->{STH_SALVAGE_0}->fetchrow_array();
-		}else{
-			if(!$B->{STH_SALVAGE_1}->execute("max_id",$screen_name,$flag)){
-			}
-			@g = $B->{STH_SALVAGE_1}->fetchrow_array();
-		}
-
-		if(!($r = $B->{Net::Twitter}->user_timeline({screen_name =>$screen_name,@g,count =>200,include_entities =>1,include_rts =>1}))){
-			return();
-		}
-	}elsif($flag & 4){
-	}
-	return([@{$r}[0..39]]);
-}
-
-__DATA__
-
-
-#!/usr/bin/perl
-use constant CACHE_EXPIRE =>3600;
-use lib qw(/home/twihome2/cgi-bin);
-use vars qw($B %h);
-use utf8;
-use List::Util qw(sum min max);
-use Encode qw(encode decode);
-use DBI;
-use Storable qw(nfreeze thaw);
-#use Cache::File;
-use Cache::FileCache;
-#use Cache::Memory;
-use DateTime;
-use DateTime::Locale;
-use DateTime::Format::DateParse;
-use DateTime::Format::MySQL;
-use LWP::Simple;
-use URI::Escape;
-use XML::Simple;
-use JSON qw(encode_json decode_json);
-#use Net::Twitter::Lite;
-#use Text::ChaSen;
-#use Text::MeCab;
-use MeCab;
-use URI::GoogleChart;
-use Data::Dumper;
-
-
-sub get_user_twitter_status_common
-{
-	use constant F_TWEET =>1 << 0;
-	use constant F_REPLYFROM =>1 << 1;
-	use constant F_REPLYTO =>1 << 2;
-	use constant F_RETWEETFROM =>1 << 3;
-	use constant F_RETWEETTO =>1 << 4;
-	use constant F_FAVORITEFROM =>1 << 5;
-	use constant F_FAVORITETO =>1 << 6;
-	use constant F_TWEETWITHHASH =>1 << 7;
-
-	#warn("TwihomeCore \&".(caller(0))[3]."(".join(",",@_).") : ");
-	my $cap = shift();
-	my $screen_name = shift();
-	my %a = @_;
-
-	sub rep_link
-	{
-		my $p = shift();
-		my $k = shift();
-		my $d = shift() || [];
-		my $prefix = shift() || [];
-		my $suffix = shift() || [];
-		$p->{$k."_raw"} = $p->{$k};
-		$p->{$k} =~s/(https?:\/{2}[^\x00-\x20\x7F]+)/<a href="$1" target="_blank">$1<\/a>/go;
-		$p->{$k} =~s/\@([0-9A-Za-z_]+)/<a href="$d->[1]\/$1"><span class="link-point">\@<\/span>$prefix->[1]$1$suffix->[1]<\/a>/go;
-		$p->{$k} =~s/#([^\x00-\x20\x7F]+)/<a href="$d->[2]\/$1"><span class="link-point">#<\/span>$prefix->[2]$1$suffix->[2]<\/a>/go;
-		return();
-	}
-	sub set_created_at
-	{
-		my $p = shift();
-		my $k = shift();
-		my $DateTime = DateTime::Format::DateParse->parse_datetime($p->{$k});
-		$DateTime->set_locale(DateTime::Locale->load("ja_JP"));
-		$DateTime->set_time_zone("Asia/Tokyo");
-		$p->{$k."_ymd"} = $DateTime->ymd("-");
-		$p->{$k."_hms"} = $DateTime->hms(":");
-		$p->{$k."_d"} = $DateTime->day();
-		$p->{$k."_ymdwJP"} = $DateTime->strftime("%Y年%m月%d日(%a)");
-		$p->{$k."_MySQL"} = DateTime::Format::MySQL->format_datetime($DateTime);
-		return();
-	}
-
-	my $r = [];
-	if($cap == F_TWEET){
-		my $since_id = $B->{DBI}->selectrow_array("SELECT `id` FROM `tweet` WHERE `screen_name` = ? AND `tweet_cap` & ? ORDER BY `created_at` DESC LIMIT 0,1",{},$screen_name,F_TWEET);
-		if(!($r = $B->{Net::Twitter}->user_timeline({screen_name =>$screen_name,count =>200,$since_id > 0 ? (since_id =>$since_id) : (),include_rts =>1,include_entities =>1}))){
-			warn("TwihomeCore \&".(caller(0))[3]."(".join(",",@_).") : ".$B->{Net::Twitter}->get_error());
-			return();
-		}
-	}elsif($cap == F_REPLYFROM){
-		my $since_id = $B->{DBI}->selectrow_array("SELECT `id` FROM `tweet` WHERE FIND_IN_SET(?,`tweet_reply`) AND `tweet_cap` & ? ORDER BY `created_at` DESC LIMIT 0,1",{},$screen_name,F_REPLYFROM);
-		#if(!($r = $B->{Net::Twitter}->mentions({screen_name =>$screen_name,count =>200,$since_id > 0 ? (since_id =>$since_id) : (),include_rts =>1,include_entities =>1}))){
-		if(!($r = $B->{Net::Twitter}->search({q =>"\@".$screen_name,count =>200,$since_id > 0 ? (since_id =>$since_id) : (),include_rts =>1,include_entities =>1})->{results})){
-			warn("TwihomeCore \&".(caller(0))[3]."(".join(",",@_).") : ".$B->{Net::Twitter}->get_error());
-			return();
-		}
-		map{$_->{user}->{screen_name} = $_->{from_user}}@{$r};
-	}elsif($cap == F_FAVORITETO){
-		my $since_id = $B->{DBI}->selectrow_array("SELECT `id` FROM `tweet` WHERE FIND_IN_SET(?,`tweet_favorite`) AND `tweet_cap` & ? ORDER BY `created_at` DESC LIMIT 0,1",{},$screen_name,F_FAVORITETO);
-		if(!($r = $B->{Net::Twitter}->favorites({screen_name =>$screen_name,count =>200,$since_id > 0 ? (since_id =>$since_id) : (),include_rts =>1,include_entities =>1}))){
-			warn("TwihomeCore \&".(caller(0))[3]."(".join(",",@_).") : ".$B->{Net::Twitter}->get_error());
-			return();
-		}
-	}
-
-	map{
-		&rep_link($_,"text",[undef,undef,"/-hash"]);
-		&set_created_at($_,"created_at");
-		my $tweet_reply = join(",",$_->{text_raw} =~m/\@([0-9A-Za-z_]+)/go);
-		my $tweet_favorite = F_FAVORITETO ? $screen_name : undef;
-		my $tweet_hashtag = join(",",$_->{text_raw} =~m/#([^\x00-\x20\x7F]+)/go);
-		my $tweet_cap = $cap;
-		if($tweet_reply){
-			$tweet_cap |= F_REPLYTO;
-		}
-		if($tweet_hashtag){
-			$tweet_cap |= F_TWEETWITHHASH;
-		}
-		$B->{DBI}->do(
-			"INSERT INTO `tweet` (`screen_name`,`id`,`created_at`,`text`,`struct`,`tweet_reply`,`tweet_favorite`,`tweet_hashtag`,`tweet_cap`) VALUES(?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `tweet_cap` = `tweet_cap` | ?,`tweet_favorite` = IF(FIND_IN_SET(?,`tweet_favorite`),`tweet_favorite`,CONCAT_WS(',',`tweet_favorite`,?))",
-			{},
-			$_->{user}->{screen_name},
-			$_->{id},
-			$_->{created_at_MySQL},
-			$_->{text_raw},
-			nfreeze($_),
-			$tweet_reply,
-			$tweet_favorite,
-			$tweet_hashtag,
-			$tweet_cap,
-			F_TWEET,
-			$_->{user}->{screen_name},
-			$tweet_favorite,
-		);
-	}@{$r};
-	warn("TwihomeCore \&".(caller(0))[3]."(".join(",",@_).") : db push ".($#{$r} + 1)." record.");
-
-	return(1);
-}
-
-sub cb_user_twitter_timeline
-{
-	my $q = shift();
-	my($screen_name,undef,$args) = @{$q};
-	my $sign = join("/",CACHE_PREFIX,$screen_name,(caller(0))[3]);
-
-	my $r;
-	if(!defined($r = $B->{Cache::FileCache}->get($sign))){
-		warn("TwihomeCore \&".(caller(0))[3]."(".join(",",@_).") : read source.");
-		if(&get_user_twitter_status_common(F_TWEET,$screen_name,{read =>"update"}) && ($r = (&cb_user_twitter_timeline_log($q))[1])){
-			$B->{Cache::FileCache}->set($sign,$r);
-		}
-	}
-	return("Dumper",$r);
-}
-
-sub cb_user_twitter_timeline_log
-{
-	my $q = shift();
-	shift();
-	shift();
-	shift();
-	my $tweet_cap = shift() || F_TWEET;
-	my($screen_name,undef,$args) = @{$q};
-	my $sign = join("/",CACHE_PREFIX,$screen_name,(caller(0))[3]);
-
-	my $r;
-	if($args =~ /^([0-9]+)\-$/o){
-		if($r = $B->{DBI}->selectall_arrayref("SELECT `struct` FROM `tweet` WHERE `screen_name` = ? AND `id` > ? AND `tweet_cap` & ? ORDER BY `created_at` DESC LIMIT 0,20",{},$screen_name,$1,$tweet_cap)){
-			$r = [map{thaw($_->[0])}@{$r}];
-		}
-	}elsif($args =~ /^\-([0-9]+)$/o){
-		if($r = $B->{DBI}->selectall_arrayref("SELECT `struct` FROM `tweet` WHERE `screen_name` = ? AND `id` < ? AND `tweet_cap` & ? ORDER BY `created_at` DESC LIMIT 0,20",{},$screen_name,$1,$tweet_cap)){
-			$r = [map{thaw($_->[0])}@{$r}];
-		}
-	}else{
-		if($r = $B->{DBI}->selectall_arrayref("SELECT `struct` FROM `tweet` WHERE `screen_name` = ? AND `tweet_cap` & ? ORDER BY `created_at` DESC LIMIT 0,20",{},$screen_name,$tweet_cap)){
-			$r = [map{thaw($_->[0])}@{$r}];
-		}
-	}
-	return("Dumper",$r);
-}
-
-sub cb_user_twitter_replies
-{
-	my $q = shift();
-	my($screen_name,undef,$args) = @{$q};
-	my $sign = join("/",CACHE_PREFIX,$screen_name,(caller(0))[3]);
-
-	my $r;
-	#if(!defined($r = $B->{Cache::FileCache}->get($sign))){
-		warn("TwihomeCore \&".(caller(0))[3]."(".join(",",@_).") : read source.");
-		if(&get_user_twitter_status_common(F_REPLYFROM,$screen_name,{read =>"update"}) && ($r = (&cb_user_twitter_replies_log($q,undef,undef,undef,F_REPLYFROM))[1])){
-			$B->{Cache::FileCache}->set($sign,$r);
-		}
-	#}
-	return("Dumper",$r);
-}
-
-sub cb_user_twitter_replies_log
-{
-	my $q = shift();
-	shift();
-	shift();
-	shift();
-	my $tweet_cap = shift() || F_REPLYFROM;
-	my($screen_name,undef,$args) = @{$q};
-	my $sign = join("/",CACHE_PREFIX,$screen_name,(caller(0))[3]);
-
-	my $r;
-	if($args =~ /^([0-9]+)\-$/o){
-		if($r = $B->{DBI}->selectall_arrayref("SELECT `struct` FROM `tweet` WHERE FIND_IN_SET(?,`tweet_reply`) AND `id` > ? AND `tweet_cap` & ? ORDER BY `created_at` DESC LIMIT 0,20",{},$screen_name,$1,$tweet_cap)){
-			$r = [map{thaw($_->[0])}@{$r}];
-		}
-	}elsif($args =~ /^\-([0-9]+)$/o){
-		if($r = $B->{DBI}->selectall_arrayref("SELECT `struct` FROM `tweet` WHERE FIND_IN_SET(?,`tweet_reply`) AND `id` < ? AND `tweet_cap` & ? ORDER BY `created_at` DESC LIMIT 0,20",{},$screen_name,$1,$tweet_cap)){
-			$r = [map{thaw($_->[0])}@{$r}];
-		}
-	}else{
-		if($r = $B->{DBI}->selectall_arrayref("SELECT `struct` FROM `tweet` WHERE FIND_IN_SET(?,`tweet_reply`) AND `tweet_cap` & ? ORDER BY `created_at` DESC LIMIT 0,20",{},$screen_name,$tweet_cap)){
-			$r = [map{thaw($_->[0])}@{$r}];
-		}
-	}
-	return("Dumper",$r);
-}
-
-sub cb_user_twitter_favorites
-{
-	my $q = shift();
-	my($screen_name,undef,$args) = @{$q};
-	my $sign = join("/",CACHE_PREFIX,$screen_name,(caller(0))[3]);
-
-	my $r;
-	#if(!defined($r = $B->{Cache::FileCache}->get($sign))){
-		warn("TwihomeCore \&".(caller(0))[3]."(".join(",",@_).") : read source.");
-		if(&get_user_twitter_status_common(F_FAVORITETO,$screen_name,{read =>"update"}) && ($r = (&cb_user_twitter_favorites_log($q))[1])){
-			# Dumping circular structures is not supported with JSON::Syck
-			my $fixsub = sub{
-				my $p = shift();
-				while(my($k,$v) = each(%{$p})){
-					if(ref($p->{$k}) eq "JSON::XS::Boolean"){
-						$p->{$k} = undef;
-					}
-				}
-				return();
-			};
-			map{
-				&{$fixsub}($_);
-				&{$fixsub}($_->{user});
-			}@{$r};
-			$B->{Cache::FileCache}->set($sign,$r);
-		}
-	#}
-	return("Dumper",$r);
-}
-
-sub cb_user_twitter_favorites_log
-{
-	my $q = shift();
-	shift();
-	shift();
-	shift();
-	my $tweet_cap = shift() || F_FAVORITETO;
-	my($screen_name,undef,$args) = @{$q};
-	my $sign = join("/",CACHE_PREFIX,$screen_name,(caller(0))[3]);
-
-	my $r;
-	if($args =~ /^([0-9]+)\-$/o){
-		if($r = $B->{DBI}->selectall_arrayref("SELECT `struct` FROM `tweet` WHERE FIND_IN_SET(?,`tweet_favorite`) AND `id` > ? AND `tweet_cap` & ? ORDER BY `created_at` DESC LIMIT 0,20",{},$screen_name,$1,$tweet_cap)){
-			$r = [map{thaw($_->[0])}@{$r}];
-		}
-	}elsif($args =~ /^\-([0-9]+)$/o){
-		if($r = $B->{DBI}->selectall_arrayref("SELECT `struct` FROM `tweet` WHERE FIND_IN_SET(?,`tweet_favorite`) AND `id` < ? AND `tweet_cap` & ? ORDER BY `created_at` DESC LIMIT 0,20",{},$screen_name,$1,$tweet_cap)){
-			$r = [map{thaw($_->[0])}@{$r}];
-		}
-	}else{
-		if($r = $B->{DBI}->selectall_arrayref("SELECT `struct` FROM `tweet` WHERE FIND_IN_SET(?,`tweet_favorite`) AND `tweet_cap` & ? ORDER BY `created_at` DESC LIMIT 0,20",{},$screen_name,$tweet_cap)){
-			$r = [map{thaw($_->[0])}@{$r}];
-		}
-	}
-	return("Dumper",$r);
-}
-
-sub cb_user_twitter_timeline_analysis
-{
-	my $st = (&cb_user_twitter_profile(@_))[1];
-
-	my $r;
-	if($st){
-		$r = {map{$_,$st->{$_}}grep(/^tweet_analyze_.+?_url$/o,keys(%{$st}))};
-	}
-	return("JSON",$r);
-}
-
-sub cb_user_twitter_timeline_search
-{
-	warn("search word: ".join(",",@{$_[0]}));
-	my $a = shift();
-
-	my $r;
-	if(my $result = $B->{DBI}->selectall_arrayref("SELECT `struct` FROM `tweet` WHERE `screen_name` = ? AND `text` LIKE ? ORDER BY `created_at` DESC",{},$a->[0],"%".$a->[2]."%")){
-		$r = [map{thaw($_->[0])}@{$result}];
-	}
-	return("JSON",$r);
-}
-
-sub cb_user_twitter_timeline_date
-{
-	my $a = shift();
-
-	my $r;
-	if(my $result = $B->{DBI}->selectall_arrayref("SELECT `struct` FROM `tweet` WHERE `screen_name` = ? AND DATE(`created_at`) = ? ORDER BY `created_at` DESC",{},$a->[0],$a->[2])){
-		$r = [map{thaw($_->[0])}@{$result}];
-	}
-	return("JSON",$r);
-}
-
-sub cb_user_twitter_keyword
-{
-	my @w = map{$_->{text_raw}}@{(&cb_user_twitter_timeline(@_))[1]};
-
-	# perl say: Can't use "my $a" in sort comparison
-	my $a_ = shift();
-
-	my $sig = join("/",CACHE_PREFIX,$a_->[0],"user_keyword");
-	my $r = {};
-	if(!defined($r = $B->{Cache::FileCache}->get($sig))){
-		map{
-			s/https?:\/{2}[\x21-\x7E]+//igo;
-			s/RT \@[\w]+://igo;
-			s/\@[\w]+//igo;
-			s/\#[^\x20]+//igo;
-		}@w;
-
-		my %a = (engine =>"mecab");
-		my %w;
-		if(!defined($a{engine}) || $a{engine} eq "mecab"){
-			foreach(@w){
-				foreach(grep{(split(/\s+/o,$_))[1] =~ /名詞,一般/o}split(/\n/o,decode("utf8",$B->{MeCab}->parse($_)))){
-					++$w{(split(/\s+/o,$_))[0]};
-				}
-			}
-		}elsif($a{engine} eq "chasen"){
-			foreach(@w){
-				foreach(grep{(split(/\s+/o,$_))[3] =~ /名詞/o}split(/\n/o,Text::ChaSen::sparse_tostr($_))){
-					++$w{(split(/\s+/o,$_))[2]};
-				}
-			}
-		}else{
-			die;
-		}
-		$r = [map{{word =>$_,size =>$w{$_} > 5 ? 1 : 6 - $w{$_}}}(sort{$w{$b}<=>$w{$a}}keys(%w))[0..9]];
-		$B->{Cache::FileCache}->set($sig,$r);
-		warn("Twihome2 core/".(caller(0))[3].": read source.\n");
-	}
-	return($GET{f} eq "yaml" ? "YAML" : "JSON",$r);
-}
-
-sub cb_user_youtube
-{
-	my @w = map{$_->{word}}@{(&cb_user_twitter_keyword(@_))[1]};
-	my $a = shift();
-
-	my $sig = join("/",CACHE_PREFIX,$a->[0],"youtube");
-	my $r;
-	if(!defined($r = $B->{Cache::FileCache}->get($sig))){
-		$r = [values(%{&spider("http://gdata.youtube.com/feeds/api/videos/?vq=%s&max-results=%d",[join(" ",@w[0..2]),5])->{entry}})];
-		$B->{Cache::FileCache}->set($sig,$r);
-		warn("Twihome2 core/".(caller(0))[3].": read source. (".$sig.")\n");
-	}
-	return("JSON",$r);
-}
-
-sub cb_user_google_blog
-{
-	my @w = map{$_->{word}}@{(&cb_user_twitter_keyword(@_))[1]};
-	my $a = shift();
-
-	my $sig = join("/",CACHE_PREFIX,$a->[0],"google_blog");
-	my $r;
-	if(!defined($r = $B->{Cache::FileCache}->get($sig))){
-		$r = &spider("http://ajax.googleapis.com/ajax/services/search/blogs?v=1.0&q=%s",[join(" ",@w[0..1]),5],type =>"json");
-		$B->{Cache::FileCache}->set($sig,$r);
-		warn("Twihome2 core/".(caller(0))[3].": read source.\n");
-	}
-	return("JSON",$r);
-}
-
-sub cb_user_find2ch
-{
-	my @w = map{$_->{word}}@{(&cb_user_twitter_keyword(@_))[1]};
-	my $a = shift();
-
-	my $sig = join("/",CACHE_PREFIX,$a->[0],"find2ch");
-	my $r;
-	if(!defined($r = $B->{Cache::FileCache}->get($sig))){
-		# find2ch is bugged, need more tests.
-		#$r = &spider("http://find.2ch.net/?STR=%s&COUNT=%d&TYPE=TITLE&BBS=ALL",[join(" ",@w[0]),5],type =>"html",regex =>qr/<dt><a href="(http:\/{2}[\w]+\.2ch\.net\/.+?)">([^<>]+)<\/a>/);
-		$r = &spider("http://find.2ch.net/?STR=%s",[join(" ",@w[0..0]),5],type =>"html",regex =>qr/<dt><a href="(http:\/{2}[\w]+\.2ch\.net\/.+?)">([^<>]+)<\/a>/);
-		$B->{Cache::FileCache}->set($sig,$r);
-		warn("Twihome2 core/".(caller(0))[3].": read source.\n");
-	}
-	return("JSON",$r);
-}
-
-sub cb_user_hatena_diary
-{
-	my @w = map{$_->{word}}@{(&cb_user_twitter_keyword(@_))[1]};
-	unshift(@w,"site:d.hatena.ne.jp");
-	my $a = shift();
-
-	my $sig = join("/",CACHE_PREFIX,$a->[0],"hatena");
-	my $r;
-	if(!defined($r = $B->{Cache::FileCache}->get($sig))){
-		$r = &spider("http://ajax.googleapis.com/ajax/services/search/web?v=1.0&q=%s",[join(" ",@w[0..1]),5],type =>"json");
-		$B->{Cache::FileCache}->set($sig,$r);
-		warn("Twihome2 core/".(caller(0))[3].": read source.\n");
-	}
-	return("JSON",$r);
-}
-
-sub user
-{
-my $u = fetchTwitterUser("namusyaka");
-my $t = fetchTwitterTimeline("namusyaka",20);
-my $k = fetch(\&fetchKeyword,[[map{$_->{text}}@{$t}],engine =>"mecab"],cache =>"namusyaka"."_MeCab",type =>"raw");
-my %a = (
-	%{$u},
-	timeline =>$t,
-	keyword =>$k,
-	youtube =>fetchYouTube(join(" ",@{$k}),5),
-	#find2ch =>fetchFind2ch(join(" ",@{$k}),5),
-	gblog =>fetchGoogleBlog(join(" ",@{$k})),
-);
-}
-
-sub spider
-{
-	my $l = shift();
-	my $a = shift();
-	my %a = @_;
-
-	my $r;
-	#if(!defined($a{cache}) || !defined($r = $h{Cache::FileCache}->get(CACHE_PREFIX.$a{cache}))){
-		warn("spider: ".sprintf($l,map{uri_escape_utf8($_)}@{$a}));
-		if(ref($l) eq "CODE" && defined(&{$l}) && !defined($r = &{$l}(@{$a}))){
-		}elsif($l =~ /^file:\/{2}(.+?)$/o){
-		}elsif($l =~ /^https?:\/{2}/o & !defined($r = get(sprintf($l,map{uri_escape_utf8($_)}@{$a})))){
-			die;
-		}else{
-		}
-
-		if((!defined($a{type}) || $a{type} eq "xml") && !defined($r = XML::Simple->new()->XMLin($r))){
-			die;
-		}elsif($a{type} eq "json" && !defined($r = decode_json(encode("utf-8",$r)))){
-			die;
-		}elsif($a{type} eq "html" && !defined($r = do{my @r;while($r =~ /$a{regex}/ig){push(@r,[$1,$2,$3,$4,$5,$6,$7,$8,$9])}$#r != -1 ? \@r : undef})){
-			#die;
-		}elsif($a{type} eq "raw"){
-		}else{
-		}
-
-		#if(defined($r)){
-		#	$h{Cache::FileCache}->set(CACHE_PREFIX.$a{cache},$r);
-		#}
-	#}else{
-	#}
-	return(ref($r) ? $r : undef)
-}
-
-
-
-1;
