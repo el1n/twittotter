@@ -85,25 +85,21 @@ CLI_QC_0=TRUNCATE TABLE `Queue`
 CLI_QI_0=SELECT * FROM `Queue` WHERE `user_id` = ? AND `order` LIKE ? AND `flag` & ? = ? LIMIT 0,1
 CLI_QI_1=
 CLI_QI_2=INSERT `Queue` (`user_id`,`screen_name`,`order`,`priority`,`flag`) VALUES(?,?,?,?,?)
-CLI_QE_0=SELECT * FROM `Queue` LEFT JOIN `Token` ON `Queue`.`screen_name` = `Token`.`screen_name` WHERE `flag` & 1 ORDER BY `Queue`.`priority`,`Queue`.`ctime` LIMIT 0,1
+CLI_QE_0=SELECT * FROM `Queue` LEFT JOIN `Token` ON `Queue`.`user_id` = `Token`.`user_id` WHERE `flag` & 1 ORDER BY `Queue`.`priority`,`Queue`.`ctime` LIMIT 0,1
 CLI_QE_1=UPDATE `Queue` SET `flag` = ?,`mtime` = CURRENT_TIMESTAMP WHERE `id` = ?
 SALVAGE_0=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,1
 SALVAGE_1=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` ASC LIMIT 0,1
 SALVAGE_2=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referred_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` DESC LIMIT 0,1
 SALVAGE_3=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referred_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` ASC LIMIT 0,1
+SALVAGE_4=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referring_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` DESC LIMIT 0,1
+SALVAGE_5=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referring_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` ASC LIMIT 0,1
 SALVAGE_6=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_at`,`structure`,`flag`) VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `structure` = VALUES(`structure`),`flag` = `flag` | ?
-SALVAGE_7=SELECT COUNT(*) FROM `Bind` WHERE `status_id` = ? AND (`referring_user_id` = ? OR `referring_user_screen_name` = ?) AND (`referred_user_id` = ? OR `referred_user_screen_name` = ?) AND `flag` | ? = ?
+SALVAGE_7=SELECT 1 FROM `Bind` WHERE `status_id` = ? AND (`referring_user_id` = ? OR `referring_user_screen_name` = ?) AND (`referred_user_id` = ? OR `referred_user_screen_name` = ?) AND `flag` | ? = ?
 SALVAGE_8=INSERT `Bind` (`status_id`,`referring_user_id`,`referring_user_screen_name`,`referred_user_id`,`referred_user_screen_name`,`flag`) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `flag` = `flag` | ?
 SALVAGE_9=SELECT * FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 
-CMD_QE_0=SELECT `Queue`.*,`Token`.`ACCESS_TOKEN`,`Token`.`ACCESS_TOKEN_SECRET` FROM `Queue` LEFT JOIN `Token` ON `Queue`.`screen_name` = `Token`.`screen_name` WHERE `flag` & 1 ORDER BY `Queue`.`priority`,`Queue`.`ctime` LIMIT 0,1
-CMD_QE_1=SELECT COUNT(*) FROM `Queue` WHERE `screen_name` = ? AND `order` LIKE ? AND 1 | ? AND `flag` & 1 AND 1 | ?
-CMD_QE_2=INSERT `Queue` (`screen_name`,`order`,`priority`,`flag`) VALUES(?,?,?,? | 1)
-CMD_QE_3=UPDATE `Queue` SET `flag` = ? WHERE `id` = ?
 INDEX_0=INSERT `Token` (`id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE `ctime` = CURRENT_TIMESTAMP
 SHOW_0=SELECT * FROM `Queue` WHERE `screen_name` = ? ORDER BY `ctime` DESC LIMIT 0,40
-SALVAGE_4=SELECT ?,`status_id` FROM `Tweet` WHERE `screen_name` = ? AND `flag` & ? ORDER BY `status_id` DESC LIMIT 0,1
-SALVAGE_5=SELECT ?,`status_id` FROM `Tweet` WHERE `screen_name` = ? AND `flag` & ? ORDER BY `status_id` ASC LIMIT 0,1
 
 [Memcached]
 HOST=127.0.0.1:11211
@@ -218,10 +214,10 @@ given(shift(@ARGV)){
 				#&new_queue($user_id,$screen_name,"UPDATE.TIMELINE",I_PRIORITY_HIGH,F_TWEETS);
 				#&new_queue($user_id,$screen_name,"UPDATE.MENTION",I_PRIORITY_HIGH,F_REPLIES);
 				#&new_queue($user_id,$screen_name,"UPDATE.FAVORITE",I_PRIORITY_HIGH,F_FAVORITES);
-				#&new_queue($user_id,$screen_name,"SALVAGE.TIMELINE",I_PRIORITY_HIGH,F_TWEETS);
-				#&new_queue($user_id,$screen_name,"SALVAGE.MENTION",I_PRIORITY_HIGH,F_REPLIES);
+				&new_queue($user_id,$screen_name,"SALVAGE.TIMELINE",I_PRIORITY_HIGH,F_TWEETS);
+				&new_queue($user_id,$screen_name,"SALVAGE.MENTION",I_PRIORITY_HIGH,F_REPLIES);
 				&new_queue($user_id,$screen_name,"SALVAGE.RETWEETED",I_PRIORITY_HIGH,F_RETWEETED);
-				#&new_queue($user_id,$screen_name,"SALVAGE.FAVORITE",I_PRIORITY_HIGH,F_FAVORITES);
+				&new_queue($user_id,$screen_name,"SALVAGE.FAVORITE",I_PRIORITY_HIGH,F_FAVORITES);
 			}
 			return($user_id);
 		}
@@ -322,9 +318,9 @@ sub salvage
 		my $referred_user_screen_name = shift();
 		my $flag = shift();
 
-		if(!$B->{DBT_SALVAGE_7}->execute($status_id,$referring_user_id,$referring_user_screen_name,$referred_user_id,$referred_user_screen_name,$flag,$flag)){
+		if($B->{DBT_SALVAGE_7}->execute($status_id,$referring_user_id,$referring_user_screen_name,$referred_user_id,$referred_user_screen_name,$flag,$flag) > 0){
 			return();
-		}elsif(!$B->{DBT_SALVAGE_8}->execute($status_id,$referring_user_id,$referring_user_screen_name,$referred_user_id,$referred_user_screen_name,$flag,$flag)){
+		}elsif($B->{DBT_SALVAGE_8}->execute($status_id,$referring_user_id,$referring_user_screen_name,$referred_user_id,$referred_user_screen_name,$flag,$flag) == 0){
 			return();
 		}
 		return(1);
@@ -352,13 +348,13 @@ sub salvage
 				$i = $axis ? 0 : 1;
 			}
 			when(F_REPLIES){
-				continue();
+				$i = $axis ? 2 : 3;
 			}
 			when(F_FAVORITES){
-				continue();
+				$i = $axis ? 4 : 5;
 			}
 			when(F_RETWEETED){
-				$i = $axis ? 2 : 3;
+				$i = $axis ? 0 : 1;
 			}
 		}
 		if($B->{DBT_SALVAGE_.$i}->execute($g,$user_id,$flag,$flag) == 0){
