@@ -98,8 +98,9 @@ SALVAGE_7=SELECT 1 FROM `Bind` WHERE `status_id` = ? AND (`referring_user_id` = 
 SALVAGE_8=INSERT `Bind` (`status_id`,`referring_user_id`,`referring_user_screen_name`,`referred_user_id`,`referred_user_screen_name`,`flag`) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `flag` = `flag` | ?
 SALVAGE_9=SELECT * FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 
-INDEX_0=INSERT `Token` (`id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE `ctime` = CURRENT_TIMESTAMP
-SHOW_0=SELECT * FROM `Queue` WHERE `screen_name` = ? ORDER BY `ctime` DESC LIMIT 0,40
+INDEX_0=INSERT `Token` (`user_id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE `ctime` = CURRENT_TIMESTAMP
+SHOW_0=SELECT * FROM `Queue` WHERE `user_id` = ? OR `screen_name` = ? ORDER BY `ctime` DESC LIMIT 0,40
+SHOW_1=SELECT `structure` FROM `Tweet` WHERE (`user_id` = ? OR `screen_name` = ?) AND `flag` & ? = ? ORDER BY `created_at` DESC LIMIT 0,40
 
 [Memcached]
 HOST=127.0.0.1:11211
@@ -107,6 +108,7 @@ HOST=127.0.0.1:11211
 [QueueDescription]
 SALVAGE.TIMELINE=過去のツイート取得 (200件)
 SALVAGE.MENTION=過去のリプライ取得 (200件)
+SALVAGE.RETWEETED=過去のリツイート取得 (200件)
 SALVAGE.FAVORITE=過去のお気に入り取得 (200件)
 
 EOF
@@ -162,7 +164,7 @@ sub gunzip
 
 sub unpack_Structure
 {
-	my $g = shift();
+	my $g = shift() // $_;
 
 	$g->{structure} = gunzip($g->{structure});
 	return($g);
@@ -175,6 +177,19 @@ sub encode_MySQLTime
 	$DateTime->set_locale(DateTime::Locale->load($C->{_}->{LOCALE}));
 	return(DateTime::Format::MySQL->format_datetime($DateTime));
 }
+
+if(defined($ENV{GATEWAY_INTERFACE})){
+	BlackCurtain::Ignorance->new(
+		[
+			[qr/./,\&cb_prepare],
+			[qr/^\/?$/,\&cb_index],
+			[qr/^\/(\w+)(?:\.([a-z]+))?(?:\/[fjr])?\/?$/,\&cb_show],
+		],
+		CGI::Session =>["driver:memcached",undef,{Memcached =>$B->{Cache::Memcached}}],
+		Text::Xslate =>[path =>[split(/ /o,$C->{_}->{TEMPLATE})],cache_dir =>$C->{_}->{CACHE_DIR}],
+	)->perform();
+}else{
+
 
 given(shift(@ARGV)){
 	when("-qc"){
@@ -292,18 +307,10 @@ given(shift(@ARGV)){
 		}
 	}
 	when(""){
-		BlackCurtain::Ignorance->new(
-			[
-				[qr/./,\&cb_prepare],
-				[qr/^\/?$/,\&cb_index],
-				[qr/^\/(\w+)(?:\.([a-z]+))?(?:\/[fjr])?\/?$/,\&cb_show],
-			],
-			CGI::Session =>["driver:memcached",undef,{Memcached =>$B->{Cache::Memcached}}],
-			Text::Xslate =>[path =>[split(/ /o,$C->{_}->{TEMPLATE})],cache_dir =>$C->{_}->{CACHE_DIR}],
-		)->perform();
 	}
 	default{
 	}
+}
 }
 exit(0);
 
@@ -350,11 +357,11 @@ sub salvage
 			when(F_REPLIES){
 				$i = $axis ? 2 : 3;
 			}
-			when(F_FAVORITES){
-				$i = $axis ? 4 : 5;
-			}
 			when(F_RETWEETED){
 				$i = $axis ? 0 : 1;
+			}
+			when(F_FAVORITES){
+				$i = $axis ? 4 : 5;
 			}
 		}
 		if($B->{DBT_SALVAGE_.$i}->execute($g,$user_id,$flag,$flag) == 0){
@@ -375,13 +382,13 @@ sub salvage
 				return(-1);
 			}
 		}
-		when(F_FAVORITES){
-			if(!($r = $B->{Net::Twitter}->favorites({id =>$user_id,&getedge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
+		when(F_RETWEETED){
+			if(!($r = $B->{Net::Twitter}->retweets_of_me({id =>$user_id,&getedge($user_id,$flag,$axis),count =>200,include_entities =>1}))){
 				return(-1);
 			}
 		}
-		when(F_RETWEETED){
-			if(!($r = $B->{Net::Twitter}->retweets_of_me({id =>$user_id,&getedge($user_id,$flag,$axis),count =>200,include_entities =>1}))){
+		when(F_FAVORITES){
+			if(!($r = $B->{Net::Twitter}->favorites({id =>$user_id,&getedge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
 				return(-1);
 			}
 		}
@@ -408,7 +415,7 @@ sub salvage
 						$flag | F_RETWEETS,
 					);
 				}elsif($structure->{text} =~ /^(.+?)RT \@([0-9A-Za-z_]{1,15}):/o){
-					push(@flag,F_RETWEETS);
+					push(@flag,F_QUOTETWEETS);
 					&bind(
 						$structure->{id},
 						$structure->{user}->{id},
@@ -474,16 +481,6 @@ sub salvage
 					);
 				}
 			}
-			when(F_FAVORITES){
-				&bind(
-					$structure->{id},
-					$user_id,
-					$screen_name,
-					$structure->{user}->{id},
-					$structure->{user}->{screen_name},
-					$flag,
-				);
-			}
 			when(F_RETWEETED){
 				for my $i (0..15){
 					my $r = $B->{Net::Twitter}->retweeted_by({id =>$structure->{id},count =>200,page =>$i,include_entities =>1});
@@ -503,6 +500,16 @@ sub salvage
 						last();
 					}
 				}
+			}
+			when(F_FAVORITES){
+				&bind(
+					$structure->{id},
+					$user_id,
+					$screen_name,
+					$structure->{user}->{id},
+					$structure->{user}->{screen_name},
+					$flag,
+				);
 			}
 			default{
 			}
@@ -560,13 +567,6 @@ sub cb_prepare
 	return();
 }
 
-__END__
-
-	}
-}
-exit(0);
-
-
 sub cb_index
 {
 	if(!defined($GET{op})){
@@ -582,15 +582,17 @@ EOF
 	}elsif($GET{op} eq "login" && $GET{oauth_token} && $GET{oauth_verifier}){
 		$B->{Net::Twitter}->request_token($SES{REQUEST_TOKEN});
 		$B->{Net::Twitter}->request_token_secret($SES{REQUEST_TOKEN_SECRET});
-		@SES{qw(ACCESS_TOKEN ACCESS_TOKEN_SECRET id screen_name)} = $B->{Net::Twitter}->request_access_token(token =>$GET{oauth_token},verifier =>$GET{oauth_verifier});
-		if($SES{id} > 0){
-			if($B->{STH_INDEX_0}->execute(@SES{qw(id screen_name ACCESS_TOKEN ACCESS_TOKEN_SECRET)}) == 0){
+		@SES{qw(ACCESS_TOKEN ACCESS_TOKEN_SECRET user_id screen_name)} = $B->{Net::Twitter}->request_access_token(token =>$GET{oauth_token},verifier =>$GET{oauth_verifier});
+		if($SES{user_id} > 0){
+			if($B->{DBT_INDEX_0}->execute(@SES{qw(user_id screen_name ACCESS_TOKEN ACCESS_TOKEN_SECRET)}) == 0){
 				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
-			}elsif(!&new_queue($SES{screen_name},"SALVAGE.TIMELINE",I_PRIORITY_MIDIUM,F_QUEUE|F_TWEETS)){
+			}elsif(!&new_queue($SES{user_id},$SES{screen_name},"SALVAGE.TIMELINE",I_PRIORITY_HIGH,F_QUEUE|F_TWEETS)){
 				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
-			}elsif(!&new_queue($SES{screen_name},"SALVAGE.MENTION",I_PRIORITY_MIDIUM,F_QUEUE|F_REPLIES)){
+			}elsif(!&new_queue($SES{user_id},$SES{screen_name},"SALVAGE.MENTION",I_PRIORITY_HIGH,F_QUEUE|F_REPLIES)){
 				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
-			}elsif(!&new_queue($SES{screen_name},"SALVAGE.FAVORITE",I_PRIORITY_MIDIUM,F_QUEUE|F_FAVORITES)){
+			}elsif(!&new_queue($SES{user_id},$SES{screen_name},"SALVAGE.RETWEETED",I_PRIORITY_HIGH,F_QUEUE|F_RETWEETED)){
+				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
+			}elsif(!&new_queue($SES{user_id},$SES{screen_name},"SALVAGE.FAVORITE",I_PRIORITY_HIGH,F_QUEUE|F_FAVORITES)){
 				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
 			}
 			return("jump","http://".$ENV{HTTP_HOST}.$ENV{SCRIPT_NAME}."/".$SES{screen_name});
@@ -617,6 +619,7 @@ sub cb_show
 	my $g = shift();
 	my($screen_name,$page) = @{$q};
 	my($screen_name,$issue) = @{$m};
+	my $user_id = user_id($screen_name);
 
 	my $r = {};
 	my $sign = join(".",$C->{_}->{CACHE_PREFIX},$screen_name).".";
@@ -629,29 +632,143 @@ sub cb_show
 
 	if(!defined($page)){
 		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."timeline"))){
-			#if(!($r->{status} = &salvage(undef,$m,undef,[2,1]))){
-			#	return(&cb_exception(undef,undef,undef,"ユーザ情報取得失敗"));
-			#}
+			if(!$B->{DBT_SHOW_1}->execute($user_id,$screen_name,F_TWEETS,F_TWEETS)){
+			}
+			map{
+				unpack_Structure();
+				$_ = $_->{structure}->{twitter};
+
+				for my $url (@{$_->{entities}->{urls}}){
+					$_->{text} =~s/$url->{url}/$url->{expanded_url}/g;
+				}
+			}@{$r->{status} = $B->{DBT_SHOW_1}->fetchall_arrayref({})};
 			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
 		}
 	}elsif($page eq "j"){
-		if($B->{STH_SHOW_0}->execute($r->{screen_name})){
-			map{$_->{description} = $C->{QueueDescription}->{uc($_->{order})}}@{$r->{_queue} = $B->{STH_SHOW_0}->fetchall_arrayref({})};
+		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."queue"))){
+			if(!$B->{DBT_SHOW_0}->execute($user_id,$screen_name)){
+			}
+			map{
+1;
+			}@{$r->{queue} = $B->{DBT_SHOW_0}->fetchall_arrayref({})};
+			#$B->{Cache::Memcached}->set($sign."queue",$r->{status},$C->{_}->{CACHE_EXPIRE});
 		}
 	}
 
 	return($issue ? $issue : "Text::Xslate",$r,data =><<'EOF');
+: constant SCREEN = 800
+: constant FONT_SIZE = 10
+: constant MENU_WIDTH = 160
+: constant TAB_WIDTH = 136
 <html>
 <head>
 <title>ついっとったー</title>
 <style type="text/css">
-body
-{
-	color: #<:$profile_text_color:>;
-	background-color: #<:$profile_background_color:>;
-	font-size: 10pt;
+body {
+	color:#<:$profile_text_color:>;
+	background-color:#CCCCCC;
+	font-size:<:FONT_SIZE:>pt;
 }
 
+th,td {
+	border-right:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+	font-size:<:FONT_SIZE:>pt;
+}
+
+.line {
+	border:solid 1px #FF0000;
+}
+.pile {
+	float:right;
+}
+.cl {
+	clear:both;
+}
+
+.overall {
+	margin:12px auto 0px auto;
+	width:<:SCREEN:>px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#<:$profile_background_color:>;
+}
+.menu {
+	margin:0px 0px 0px 0px;
+	padding:0px 0px 0px 0px;
+	width:<:MENU_WIDTH:>px;
+	border-left:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#<:$profile_sidebar_fill_color:>;
+}
+.inf
+{
+	margin:0px 2px 24px 8px;
+	padding:0px 0px 0px 0px;
+}
+.img
+{
+	margin:4px 4px 4px 4px;
+	padding:0px 0px 0px 0px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+}
+.tab
+{
+	margin:0px <:MENU_WIDTH - TAB_WIDTH:>px -1px -1px;
+	padding:6px 0px 6px 0px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+}
+.main {
+	margin:0px 0px 0px 0px;
+	padding:0px 0px 0px 0px;
+	width:<:SCREEN - MENU_WIDTH - 1:>px;
+}
+</style>
+</head>
+<body>
+<div class="overall">
+	<div class="menu pile">
+		<div class="img pile"><img src="<:$profile_image_url:>"></div>
+		<div class="inf">
+			<span id="name"><:$name:></span><br>
+			&nbsp;&nbsp;#<span id="id"><:$id:></span><br>
+			&nbsp;&nbsp;@<span id="screen_name"><:$screen_name:><br>
+		</div>
+		<div class="tab tab_active"><a href="/<:$screen_name:>">ついっと</a></div>
+		<div class="tab"><a href="/<:$screen_name:>/r">@<:$screen_name:></a></div>
+		<div class="tab"><a href="/<:$screen_name:>/f"><span style="color: yellow;">★</span></a></div>
+		<div class="tab"><a href="/<:$screen_name:>/j">きゅー</a></div>
+	</div>
+	<div class="main pile">
+:for $status -> $status {
+		<div class="">
+			<span id="screen_name">@<:$status.user.screen_name:></span>
+			<span id="text"><:$status.text:></span>
+		</div>
+:}
+<table>
+	<tr>
+		<th>登録時</th>
+		<th>実行時</th>
+		<th>内容</th>
+		<th>優先度</th>
+		<th>状態</th>
+	</tr>
+:for $queue -> $queue {
+	<tr>
+		<td><:$queue.ctime:></td>
+		<td><:$queue.mtime:></td>
+		<td><:$queue.order:></td>
+		<td><:$queue.priority:></td>
+		<td><:$queue.flag:></td>
+	</tr>
+:}
+</table>
+	</div>
+</div>
+</body>
+</html>
+EOF
+
+	return($issue ? $issue : "Text::Xslate",$r,data =><<'EOF');
 th,td
 {
 	border-right: solid 1px #<:$profile_sidebar_border_color:>;
@@ -660,20 +777,6 @@ th,td
 	font-size: 10pt;
 }
 
-.line
-{
-	border: solid 1px #000000;
-}
-.pile
-{
-	float: left;
-}
-
-.overall
-{
-	margin: 4px auto 0px auto;
-	width: 674px; # 640 + 16(menu margin) + 16(menu padding) + 2(menu border)
-}
 .menu
 {
 	background-color: #<:$profile_sidebar_fill_color:>;
@@ -726,13 +829,6 @@ th,td
 		</div>
 	</div>
 	<div class="menu pile">
-		<div class=""><span id="name"><:$name:></span></div>
-		<div class="">&nbsp;#<span id="id"><:$id:></span></div>
-		<div class="">&nbsp;@<span id="screen_name"><:$screen_name:></span></div>
-		<div class="tab tab_active"><a href="<:$screen_name:>">ついっと</a></div>
-		<div class="tab"><a href="<:$screen_name:>/r">@<:$screen_name:></a></div>
-		<div class="tab"><a href="<:$screen_name:>/f"><span style="color: yellow;">★</span></a></div>
-		<div class="tab"><a href="<:$screen_name:>/j">きゅー</a></div>
 	</div>
 </div>
 </body>
