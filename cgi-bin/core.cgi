@@ -40,7 +40,7 @@ use constant I_PRIORITY_LOW =>1;
 use constant I_PRIORITY_MIDIUM =>2;
 use constant I_PRIORITY_HIGH =>3;
 
-INIT
+BEGIN
 {
 	$C = Config::Tiny->read_string(<<'EOF');
 TIMEZONE=Asia/Tokyo
@@ -165,7 +165,7 @@ sub gunzip
 	return(thaw(Compress::Zlib::memGunzip(shift())));
 }
 
-sub unpack_Structure
+sub unpack_structure
 {
 	my $g = shift() // $_;
 
@@ -173,12 +173,18 @@ sub unpack_Structure
 	return($g);
 }
 
-sub encode_MySQLTime
+
+sub encode_DateTime
 {
 	my $DateTime = DateTime::Format::DateParse->parse_datetime(shift());
 	$DateTime->set_time_zone($C->{_}->{TIMEZONE});
 	$DateTime->set_locale(DateTime::Locale->load($C->{_}->{LOCALE}));
-	return(DateTime::Format::MySQL->format_datetime($DateTime));
+	return($DateTime);
+}
+
+sub encode_MySQLTime
+{
+	return(DateTime::Format::MySQL->format_datetime(encode_DateTime(shift())));
 }
 
 if(defined($ENV{GATEWAY_INTERFACE})){
@@ -186,7 +192,7 @@ if(defined($ENV{GATEWAY_INTERFACE})){
 		[
 			[qr/./,\&cb_prepare],
 			[qr/^\/?$/,\&cb_index],
-			[qr/^\/(\w+)(?:\.([a-z]+))?(?:\/[fgjmrs])?\/?$/,\&cb_show],
+			[qr/^\/(\w+)(?:\.([a-z]+))?(?:\/([fgjmrs]))?\/?$/,\&cb_show],
 		],
 		CGI::Session =>["driver:memcached",undef,{Memcached =>$B->{Cache::Memcached}}],
 		Text::Xslate =>[path =>[split(/ /o,$C->{_}->{TEMPLATE})],cache_dir =>$C->{_}->{CACHE_DIR}],
@@ -301,7 +307,7 @@ given(shift(@ARGV)){
 			#return();
 			die();
 		}
-		print Data::Dumper::Dumper(unpack_Structure($B->{DBT_CLI_SD_0}->fetchrow_hashref()));
+		print Data::Dumper::Dumper(unpack_structure($B->{DBT_CLI_SD_0}->fetchrow_hashref()));
 	}
 	when("--twilog"){
 		for my $structure (keys(%{XMLin(shift(@ARGV))->{tweet}})){
@@ -634,88 +640,65 @@ sub cb_show
 		$B->{Cache::Memcached}->set($sign."profile",$r,$C->{_}->{CACHE_EXPIRE});
 	}
 
+	sub prepare_structure
+	{
+		my $g = shift() // $_;
+
+		unpack_structure($g);
+		$g = $g->{structure}->{twitter};
+
+		for(@{$g->{entities}->{urls}}){
+			$g->{text} =~s/$_->{url}/$_->{expanded_url}/g;
+		}
+		$g->{text} =~s/((?:ht|f)tps?:\/{2}[^\/]+\/[\x21-\x7E]+)/<a href="$1" target="_blank">$1<\/a>/g;
+		$g->{text} =~s/(#\w+)/<a href="https:\/\/twitter.com\/#!\/search\/$1" target="_blank">$1<\/a>/g;
+		$g->{text} =~s/^\@([0-9A-Za-z_]{1,15})/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>&nbsp;<a href="https:\/\/twitter.com\/#!\/$1\/status\/$g->{in_reply_to_status_id}" target="_blank">&raquo;<\/a>/g;
+		$g->{text} =~s/\@([0-9A-Za-z_]{1,15})/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>/g;
+
+		$g->{created_at_formatted} = encode_DateTime($g->{created_at})->strftime("%Y-%m-%d %H:%M");
+
+		return($g);
+	}
 	if(!defined($page)){
 		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."timeline"))){
 			if(!$B->{DBT_SHOW_1}->execute($user_id,$screen_name,F_TWEETS,F_TWEETS)){
 			}
-			map{
-				unpack_Structure();
-				$_ = $_->{structure}->{twitter};
-
-				for my $url (@{$_->{entities}->{urls}}){
-					$_->{text} =~s/$url->{url}/$url->{expanded_url}/g;
-				}
-			}@{$r->{status} = $B->{DBT_SHOW_1}->fetchall_arrayref({})};
+			map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_1}->fetchall_arrayref({})};
 			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
 		}
 	}elsif($page eq "m"){
 		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."reply"))){
 			if(!$B->{DBT_SHOW_2}->execute($user_id,$screen_name,F_REPLIES,F_REPLIES)){
 			}
-			map{
-				unpack_Structure();
-				$_ = $_->{structure}->{twitter};
-
-				for my $url (@{$_->{entities}->{urls}}){
-					$_->{text} =~s/$url->{url}/$url->{expanded_url}/g;
-				}
-			}@{$r->{status} = $B->{DBT_SHOW_2}->fetchall_arrayref({})};
+			map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_2}->fetchall_arrayref({})};
 			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
 		}
 	}elsif($page eq "f"){
 		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."reply"))){
 			if(!$B->{DBT_SHOW_3}->execute($user_id,$screen_name,F_FAVORITES,F_FAVORITES)){
 			}
-			map{
-				unpack_Structure();
-				$_ = $_->{structure}->{twitter};
-
-				for my $url (@{$_->{entities}->{urls}}){
-					$_->{text} =~s/$url->{url}/$url->{expanded_url}/g;
-				}
-			}@{$r->{status} = $B->{DBT_SHOW_3}->fetchall_arrayref({})};
+			map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_3}->fetchall_arrayref({})};
 			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
 		}
 	}elsif($page eq "g"){
 		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."reply"))){
 			if(!$B->{DBT_SHOW_2}->execute($user_id,$screen_name,F_FAVORITES,F_FAVORITES)){
 			}
-			map{
-				unpack_Structure();
-				$_ = $_->{structure}->{twitter};
-
-				for my $url (@{$_->{entities}->{urls}}){
-					$_->{text} =~s/$url->{url}/$url->{expanded_url}/g;
-				}
-			}@{$r->{status} = $B->{DBT_SHOW_2}->fetchall_arrayref({})};
+			map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_2}->fetchall_arrayref({})};
 			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
 		}
 	}elsif($page eq "r"){
 		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."reply"))){
 			if(!$B->{DBT_SHOW_3}->execute($user_id,$screen_name,F_RETWEETS,F_RETWEETS)){
 			}
-			map{
-				unpack_Structure();
-				$_ = $_->{structure}->{twitter};
-
-				for my $url (@{$_->{entities}->{urls}}){
-					$_->{text} =~s/$url->{url}/$url->{expanded_url}/g;
-				}
-			}@{$r->{status} = $B->{DBT_SHOW_3}->fetchall_arrayref({})};
+			map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_3}->fetchall_arrayref({})};
 			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
 		}
 	}elsif($page eq "s"){
 		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."reply"))){
 			if(!$B->{DBT_SHOW_2}->execute($user_id,$screen_name,F_RETWEETED,F_RETWEETED)){
 			}
-			map{
-				unpack_Structure();
-				$_ = $_->{structure}->{twitter};
-
-				for my $url (@{$_->{entities}->{urls}}){
-					$_->{text} =~s/$url->{url}/$url->{expanded_url}/g;
-				}
-			}@{$r->{status} = $B->{DBT_SHOW_2}->fetchall_arrayref({})};
+			map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_2}->fetchall_arrayref({})};
 			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
 		}
 	}elsif($page eq "j"){
@@ -732,7 +715,7 @@ sub cb_show
 	return($issue ? $issue : "Text::Xslate",$r,data =><<'EOF');
 : constant SCREEN = 800
 : constant FONT_SIZE = 10
-: constant MENU_WIDTH = 160
+: constant MENU_WIDTH = 159
 : constant TAB_WIDTH = 136
 <html>
 <head>
@@ -740,8 +723,13 @@ sub cb_show
 <style type="text/css">
 body {
 	color:#<:$profile_text_color:>;
-	background-color:#CCCCCC;
+	background-color:#<:$profile_background_color:>;
 	font-size:<:FONT_SIZE:>pt;
+	font-family:"Verdana";
+}
+a:link,a:visited,a:hover,a:active {
+	color:#<:$profile_link_color:>;
+	text-decoration:none;
 }
 
 th,td {
@@ -764,18 +752,19 @@ th,td {
 	margin:12px auto 0px auto;
 	width:<:SCREEN:>px;
 	border:solid 1px #<:$profile_sidebar_border_color:>;
-	background-color:#<:$profile_background_color:>;
+	background-color:#FFFFFF;
 }
 .menu {
 	margin:0px 0px 0px 0px;
 	padding:0px 0px 0px 0px;
 	width:<:MENU_WIDTH:>px;
 	border-left:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
 	background-color:#<:$profile_sidebar_fill_color:>;
 }
 .inf
 {
-	margin:0px 2px 24px 8px;
+	margin:0px 2px 24px 4px;
 	padding:0px 0px 0px 0px;
 }
 .img
@@ -790,125 +779,98 @@ th,td {
 	padding:6px 0px 6px 0px;
 	border:solid 1px #<:$profile_sidebar_border_color:>;
 }
+.act
+{
+	border-left:solid 1px #FFFFFF;
+	background-color:#FFFFFF;
+}
 .main {
 	margin:0px 0px 0px 0px;
 	padding:0px 0px 0px 0px;
-	width:<:SCREEN - MENU_WIDTH - 1:>px;
+	width:<:SCREEN - MENU_WIDTH - 3:>px;
+	background-color:#FFFFFF;
+}
+.timeline_name {
+	margin:0px 8px 0px 4px;
+	padding:2px 0px 2px 0px;
+}
+.timeline_text {
+	margin:0px 24px 0px 8px;
+	padding:0px 0px 2px 0px;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+}
+.screen_name {
+	color:#333333;
+	font-weight:bold;
+}
+.name {
+	color:#666666;
+}
+.created_at,.id {
+	color:#999999;
+	font-size:<:FONT_SIZE - 2:>pt;
 }
 </style>
 </head>
 <body>
 <div class="overall">
-	<div class="menu pile">
+	<div class="pile">
+	<div class="menu">
 		<div class="img pile"><img src="<:$profile_image_url:>"></div>
 		<div class="inf">
 			<span id="name"><:$name:></span><br>
 			&nbsp;&nbsp;#<span id="id"><:$id:></span><br>
 			&nbsp;&nbsp;@<span id="screen_name"><:$screen_name:><br>
 		</div>
-		<div class="tab tab_active"><a href="/<:$screen_name:>">ついっと</a></div>
-		<div class="tab"><a href="/<:$screen_name:>/r">りついっと した</a></div>
-		<div class="tab"><a href="/<:$screen_name:>/s">りついっと された</a></div>
-		<div class="tab"><a href="/<:$screen_name:>/m">@<:$screen_name:></a></div>
-		<div class="tab"><a href="/<:$screen_name:>/f"><span style="color: yellow;">&#9733; した</span></a></div>
-		<div class="tab"><a href="/<:$screen_name:>/g"><span style="color: yellow;">&#9733; された</span></a></div>
-		<div class="tab"><a href="/<:$screen_name:>/j">きゅー</a></div>
+		<div class="tab<:$MATCH[2] == nil ? " act" : "":>"><a href="/<:$screen_name:>">ついっと</a></div>
+		<div class="tab<:$MATCH[2] == "r" ? " act" : "":>"><a href="/<:$screen_name:>/r">りついっと した</a></div>
+		<div class="tab<:$MATCH[2] == "s" ? " act" : "":>"><a href="/<:$screen_name:>/s">りついっと された</a></div>
+		<div class="tab<:$MATCH[2] == "m" ? " act" : "":>"><a href="/<:$screen_name:>/m">@<:$screen_name:></a></div>
+		<div class="tab<:$MATCH[2] == "f" ? " act" : "":>"><a href="/<:$screen_name:>/f"><span style="color: yellow;">&#9733; した</span></a></div>
+		<div class="tab<:$MATCH[2] == "g" ? " act" : "":>"><a href="/<:$screen_name:>/g"><span style="color: yellow;">&#9733; された</span></a></div>
+		<div class="tab<:$MATCH[2] == "j" ? " act" : "":>"><a href="/<:$screen_name:>/j">きゅー</a></div>
+	</div>
+	<div class="">
+		<img src="/img/a.png">
+	</div>
 	</div>
 	<div class="main pile">
+:if $MATCH[2] != "j" {
 :for $status -> $status {
 		<div class="">
-			<span id="screen_name">@<:$status.user.screen_name:></span>
-			<span id="text"><:$status.text:></span>
+			<div class="timeline_name">
+				<a href="https://twitter.com/#!/<:$status.user.screen_name:>" target="_blank"><span class="screen_name"><:$status.user.screen_name:></span></a>
+				<span class="name"><:$status.user.name:></span>
+				<span class="created_at"><:$status.created_at_formatted:></span>
+				<a href="https://twitter.com/#!/<:$status.user.screen_name:>/status/<:$status.id:>" target="_blank"><span class="id">#<:$status.id:></span></a>
+			</div>
+			<div class="timeline_text"><:$status.text|mark_raw:></div>
 		</div>
 :}
-<table>
-	<tr>
-		<th></th>
-		<th>登録時</th>
-		<th>実行時</th>
-		<th>内容</th>
-		<th>優先度</th>
-		<th>状態</th>
-	</tr>
+:}else{
+		<table>
+			<tr>
+				<th></th>
+				<th>登録時</th>
+				<th>実行時</th>
+				<th>内容</th>
+				<th>優先度</th>
+				<th>状態</th>
+			</tr>
 :for $queue -> $queue {
-	<tr>
-		<td><:$queue.id:></td>
-		<td><:$queue.ctime:></td>
-		<td><:$queue.mtime:></td>
-		<td><:$queue.order:></td>
-		<td><:$queue.priority:></td>
-		<td><:$queue.flag:></td>
-	</tr>
+			<tr>
+				<td><:$queue.id:></td>
+				<td><:$queue.ctime:></td>
+				<td><:$queue.mtime:></td>
+				<td><:$queue.order:></td>
+				<td><:$queue.priority:></td>
+				<td><:$queue.flag:></td>
+			</tr>
 :}
-</table>
+		</table>
+:}
 	</div>
-</div>
-</body>
-</html>
-EOF
-
-	return($issue ? $issue : "Text::Xslate",$r,data =><<'EOF');
-th,td
-{
-	border-right: solid 1px #<:$profile_sidebar_border_color:>;
-	border-bottom: solid 1px #<:$profile_sidebar_border_color:>;
-	text-align: center;
-	font-size: 10pt;
-}
-
-.menu
-{
-	background-color: #<:$profile_sidebar_fill_color:>;
-	margin: 0px 0px 0px 16px;
-	padding: 8px 16px 8px 0px;
-	border: solid 1px #<:$profile_sidebar_border_color:>;
-	width: 160px;
-}
-.main
-{
-	width: 480px;
-}
-
-.tab
-{
-	margin: 0px 0px -1px -1px;
-	padding: 8px 0px 8px 0px;
-	border: solid 1px #<:$profile_sidebar_border_color:>;
-	text-align: center;
-}
-.tab_active
-{
-	background-color: #<:$profile_background_color:>;
-	border-left: solid 1px #<:$profile_background_color:>;
-}
-</style>
-</head>
-<body>
-<div class="overall">
-	<div class="main pile">
-		<div class="">
-			<table style="width: 100%;">
-				<tr>
-					<th></th>
-					<th>登録時</th>
-					<th>優先度</th>
-					<th>内容</th>
-					<th>状態</th>
-				</tr>
-: for $_queue -> $queue {
-				<tr>
-					<td style="width: 24px;"><:$queue.id:></td>
-					<td style="width: 128px;"><:$queue.ctime:></td>
-					<td style="width: 48px;"><:$queue.priority:></td>
-					<td style="text-align: left;"><:$queue.description:></td>
-					<td style="width: 48px;"><:$queue.flag:></td>
-				</tr>
-: }
-			</table>
-		</div>
-	</div>
-	<div class="menu pile">
-	</div>
+&nbsp;
 </div>
 </body>
 </html>
