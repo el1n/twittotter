@@ -34,6 +34,7 @@ use constant F_FAVORITES =>1 << 12;
 use constant F_REPLYTO =>1 << 13;
 use constant F_RETWEETED =>1 << 14;
 use constant F_QUOTETWEETED =>1 << 15;
+use constant F_FAVORITED =>1 << 16;
 use constant F_API =>F_TWEETS|F_REPLIES|F_FAVORITES|F_RETWEETED;
 use constant I_PRIORITY_LOW =>1;
 use constant I_PRIORITY_MIDIUM =>2;
@@ -100,7 +101,9 @@ SALVAGE_9=SELECT * FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 
 INDEX_0=INSERT `Token` (`user_id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE `ctime` = CURRENT_TIMESTAMP
 SHOW_0=SELECT * FROM `Queue` WHERE `user_id` = ? OR `screen_name` = ? ORDER BY `ctime` DESC LIMIT 0,40
-SHOW_1=SELECT `structure` FROM `Tweet` WHERE (`user_id` = ? OR `screen_name` = ?) AND `flag` & ? = ? ORDER BY `created_at` DESC LIMIT 0,40
+SHOW_1=SELECT DISTINCT `status_id`,`structure` FROM `Tweet` WHERE (`user_id` = ? OR `screen_name` = ?) AND `flag` & ? = ? ORDER BY `created_at` DESC LIMIT 0,40
+SHOW_2=SELECT DISTINCT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE (`Bind`.`referred_user_id` = ? OR `Bind`.`referred_user_screen_name` = ?) AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`created_at` DESC LIMIT 0,40
+SHOW_3=SELECT DISTINCT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE (`Bind`.`referring_user_id` = ? OR `Bind`.`referring_user_screen_name` = ?) AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`created_at` DESC LIMIT 0,40
 
 [Memcached]
 HOST=127.0.0.1:11211
@@ -183,7 +186,7 @@ if(defined($ENV{GATEWAY_INTERFACE})){
 		[
 			[qr/./,\&cb_prepare],
 			[qr/^\/?$/,\&cb_index],
-			[qr/^\/(\w+)(?:\.([a-z]+))?(?:\/[fjr])?\/?$/,\&cb_show],
+			[qr/^\/(\w+)(?:\.([a-z]+))?(?:\/[fgjmrs])?\/?$/,\&cb_show],
 		],
 		CGI::Session =>["driver:memcached",undef,{Memcached =>$B->{Cache::Memcached}}],
 		Text::Xslate =>[path =>[split(/ /o,$C->{_}->{TEMPLATE})],cache_dir =>$C->{_}->{CACHE_DIR}],
@@ -229,10 +232,11 @@ given(shift(@ARGV)){
 				#&new_queue($user_id,$screen_name,"UPDATE.TIMELINE",I_PRIORITY_HIGH,F_TWEETS);
 				#&new_queue($user_id,$screen_name,"UPDATE.MENTION",I_PRIORITY_HIGH,F_REPLIES);
 				#&new_queue($user_id,$screen_name,"UPDATE.FAVORITE",I_PRIORITY_HIGH,F_FAVORITES);
-				&new_queue($user_id,$screen_name,"SALVAGE.TIMELINE",I_PRIORITY_HIGH,F_TWEETS);
-				&new_queue($user_id,$screen_name,"SALVAGE.MENTION",I_PRIORITY_HIGH,F_REPLIES);
-				&new_queue($user_id,$screen_name,"SALVAGE.RETWEETED",I_PRIORITY_HIGH,F_RETWEETED);
-				&new_queue($user_id,$screen_name,"SALVAGE.FAVORITE",I_PRIORITY_HIGH,F_FAVORITES);
+				#&new_queue($user_id,$screen_name,"UPDATE.RETWEETED",I_PRIORITY_HIGH,F_RETWEETED);
+				#&new_queue($user_id,$screen_name,"SALVAGE.TIMELINE",I_PRIORITY_HIGH,F_TWEETS);
+				#&new_queue($user_id,$screen_name,"SALVAGE.MENTION",I_PRIORITY_HIGH,F_REPLIES);
+				#&new_queue($user_id,$screen_name,"SALVAGE.RETWEETED",I_PRIORITY_HIGH,F_RETWEETED);
+				#&new_queue($user_id,$screen_name,"SALVAGE.FAVORITE",I_PRIORITY_HIGH,F_FAVORITES);
 			}
 			return($user_id);
 		}
@@ -644,6 +648,76 @@ sub cb_show
 			}@{$r->{status} = $B->{DBT_SHOW_1}->fetchall_arrayref({})};
 			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
 		}
+	}elsif($page eq "m"){
+		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."reply"))){
+			if(!$B->{DBT_SHOW_2}->execute($user_id,$screen_name,F_REPLIES,F_REPLIES)){
+			}
+			map{
+				unpack_Structure();
+				$_ = $_->{structure}->{twitter};
+
+				for my $url (@{$_->{entities}->{urls}}){
+					$_->{text} =~s/$url->{url}/$url->{expanded_url}/g;
+				}
+			}@{$r->{status} = $B->{DBT_SHOW_2}->fetchall_arrayref({})};
+			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
+		}
+	}elsif($page eq "f"){
+		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."reply"))){
+			if(!$B->{DBT_SHOW_3}->execute($user_id,$screen_name,F_FAVORITES,F_FAVORITES)){
+			}
+			map{
+				unpack_Structure();
+				$_ = $_->{structure}->{twitter};
+
+				for my $url (@{$_->{entities}->{urls}}){
+					$_->{text} =~s/$url->{url}/$url->{expanded_url}/g;
+				}
+			}@{$r->{status} = $B->{DBT_SHOW_3}->fetchall_arrayref({})};
+			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
+		}
+	}elsif($page eq "g"){
+		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."reply"))){
+			if(!$B->{DBT_SHOW_2}->execute($user_id,$screen_name,F_FAVORITES,F_FAVORITES)){
+			}
+			map{
+				unpack_Structure();
+				$_ = $_->{structure}->{twitter};
+
+				for my $url (@{$_->{entities}->{urls}}){
+					$_->{text} =~s/$url->{url}/$url->{expanded_url}/g;
+				}
+			}@{$r->{status} = $B->{DBT_SHOW_2}->fetchall_arrayref({})};
+			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
+		}
+	}elsif($page eq "r"){
+		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."reply"))){
+			if(!$B->{DBT_SHOW_3}->execute($user_id,$screen_name,F_RETWEETS,F_RETWEETS)){
+			}
+			map{
+				unpack_Structure();
+				$_ = $_->{structure}->{twitter};
+
+				for my $url (@{$_->{entities}->{urls}}){
+					$_->{text} =~s/$url->{url}/$url->{expanded_url}/g;
+				}
+			}@{$r->{status} = $B->{DBT_SHOW_3}->fetchall_arrayref({})};
+			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
+		}
+	}elsif($page eq "s"){
+		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."reply"))){
+			if(!$B->{DBT_SHOW_2}->execute($user_id,$screen_name,F_RETWEETED,F_RETWEETED)){
+			}
+			map{
+				unpack_Structure();
+				$_ = $_->{structure}->{twitter};
+
+				for my $url (@{$_->{entities}->{urls}}){
+					$_->{text} =~s/$url->{url}/$url->{expanded_url}/g;
+				}
+			}@{$r->{status} = $B->{DBT_SHOW_2}->fetchall_arrayref({})};
+			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
+		}
 	}elsif($page eq "j"){
 		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."queue"))){
 			if(!$B->{DBT_SHOW_0}->execute($user_id,$screen_name)){
@@ -733,8 +807,11 @@ th,td {
 			&nbsp;&nbsp;@<span id="screen_name"><:$screen_name:><br>
 		</div>
 		<div class="tab tab_active"><a href="/<:$screen_name:>">ついっと</a></div>
-		<div class="tab"><a href="/<:$screen_name:>/r">@<:$screen_name:></a></div>
-		<div class="tab"><a href="/<:$screen_name:>/f"><span style="color: yellow;">★</span></a></div>
+		<div class="tab"><a href="/<:$screen_name:>/r">りついっと した</a></div>
+		<div class="tab"><a href="/<:$screen_name:>/s">りついっと された</a></div>
+		<div class="tab"><a href="/<:$screen_name:>/m">@<:$screen_name:></a></div>
+		<div class="tab"><a href="/<:$screen_name:>/f"><span style="color: yellow;">&#9733; した</span></a></div>
+		<div class="tab"><a href="/<:$screen_name:>/g"><span style="color: yellow;">&#9733; された</span></a></div>
 		<div class="tab"><a href="/<:$screen_name:>/j">きゅー</a></div>
 	</div>
 	<div class="main pile">
@@ -746,6 +823,7 @@ th,td {
 :}
 <table>
 	<tr>
+		<th></th>
 		<th>登録時</th>
 		<th>実行時</th>
 		<th>内容</th>
@@ -754,6 +832,7 @@ th,td {
 	</tr>
 :for $queue -> $queue {
 	<tr>
+		<td><:$queue.id:></td>
 		<td><:$queue.ctime:></td>
 		<td><:$queue.mtime:></td>
 		<td><:$queue.order:></td>
