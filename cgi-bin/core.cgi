@@ -35,7 +35,9 @@ use constant F_REPLYTO =>1 << 13;
 use constant F_RETWEETED =>1 << 14;
 use constant F_QUOTETWEETED =>1 << 15;
 use constant F_FAVORITED =>1 << 16;
-use constant F_API =>F_TWEETS|F_REPLIES|F_FAVORITES|F_RETWEETED;
+use constant F_SYNCHRONIZED =>1 << 17;
+use constant F_API_MASK =>F_TWEETS|F_REPLIES|F_FAVORITES|F_RETWEETED;
+use constant F_TYPE_MASK =>F_API_MASK|F_RETWEETS|F_QUOTETWEETS|F_REPLYTO|F_QUOTETWEETED|F_FAVORITED;
 use constant I_PRIORITY_LOW =>1;
 use constant I_PRIORITY_MIDIUM =>2;
 use constant I_PRIORITY_HIGH =>3;
@@ -85,25 +87,34 @@ METHOD_5=SELECT `screen_name` FROM `Tweet` WHERE `user_id` = ? LIMIT 0,1
 CLI_QC_0=TRUNCATE TABLE `Queue`
 CLI_QI_0=SELECT * FROM `Queue` WHERE `user_id` = ? AND `order` LIKE ? AND `flag` & ? = ? LIMIT 0,1
 CLI_QI_1=
-CLI_QI_2=INSERT `Queue` (`user_id`,`screen_name`,`order`,`priority`,`flag`) VALUES(?,?,?,?,?)
-CLI_QE_0=SELECT * FROM `Queue` LEFT JOIN `Token` ON `Queue`.`user_id` = `Token`.`user_id` WHERE `flag` & 1 ORDER BY `Queue`.`priority`,`Queue`.`ctime` LIMIT 0,1
+CLI_QI_2=INSERT `Queue` (`user_id`,`screen_name`,`order`,`priority`,`atime`,`flag`) VALUES(?,?,?,?,ADDTIME(CURRENT_TIMESTAMP,?),?)
+CLI_QE_0=SELECT * FROM `Queue` LEFT JOIN `Token` ON `Queue`.`user_id` = `Token`.`user_id` WHERE `atime` <= NOW() AND `flag` & 1 ORDER BY `Queue`.`priority`,`Queue`.`ctime` LIMIT 0,1
+#CLI_QE_0=SELECT * FROM `Queue` LEFT JOIN `Token` ON `Queue`.`user_id` = `Token`.`user_id` WHERE `atime` = NOW() AND `flag` & 1 ORDER BY `Queue`.`priority` DESC,`Queue`.`ctime` ASC LIMIT 0,1
 CLI_QE_1=UPDATE `Queue` SET `flag` = ?,`mtime` = CURRENT_TIMESTAMP WHERE `id` = ?
 SALVAGE_0=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,1
-SALVAGE_1=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` ASC LIMIT 0,1
+SALVAGE_1=SELECT ?,`status_id` - 1 AS `status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` ASC LIMIT 0,1
 SALVAGE_2=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referred_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` DESC LIMIT 0,1
-SALVAGE_3=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referred_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` ASC LIMIT 0,1
+SALVAGE_3=SELECT ?,`Tweet`.`status_id` - 1 AS `status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referred_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` ASC LIMIT 0,1
 SALVAGE_4=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referring_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` DESC LIMIT 0,1
-SALVAGE_5=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referring_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` ASC LIMIT 0,1
+SALVAGE_5=SELECT ?,`Tweet`.`status_id` - 1 AS `status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referring_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` ASC LIMIT 0,1
 SALVAGE_6=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_at`,`structure`,`flag`) VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `structure` = VALUES(`structure`),`flag` = `flag` | ?
-SALVAGE_7=SELECT 1 FROM `Bind` WHERE `status_id` = ? AND (`referring_user_id` = ? OR `referring_user_screen_name` = ?) AND (`referred_user_id` = ? OR `referred_user_screen_name` = ?) AND `flag` | ? = ?
-SALVAGE_8=INSERT `Bind` (`status_id`,`referring_user_id`,`referring_user_screen_name`,`referred_user_id`,`referred_user_screen_name`,`flag`) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `flag` = `flag` | ?
-SALVAGE_9=SELECT * FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
+SALVAGE_7=SELECT 1 FROM `Bind` WHERE `status_id` = ? AND (`referring_user_id` = ? OR `referring_screen_name` = ?) AND (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ?
+SALVAGE_8=INSERT `Bind` (`status_id`,`referring_user_id`,`referring_screen_name`,`referred_user_id`,`referred_screen_name`,`flag`) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `flag` = `flag` | ?
+SALVAGE_9=UPDATE `Bind` SET `flag` = ? WHERE `status_id` = ? AND (`referring_user_id` = ? OR `referring_screen_name` = ?) AND (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ?
+SALVAGE_10=SELECT * FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 
 INDEX_0=INSERT `Token` (`user_id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE `ctime` = CURRENT_TIMESTAMP
 SHOW_0=SELECT * FROM `Queue` WHERE `user_id` = ? OR `screen_name` = ? ORDER BY `ctime` DESC LIMIT 0,40
 SHOW_1=SELECT DISTINCT `status_id`,`structure` FROM `Tweet` WHERE (`user_id` = ? OR `screen_name` = ?) AND `flag` & ? = ? ORDER BY `created_at` DESC LIMIT 0,40
-SHOW_2=SELECT DISTINCT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE (`Bind`.`referred_user_id` = ? OR `Bind`.`referred_user_screen_name` = ?) AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`created_at` DESC LIMIT 0,40
-SHOW_3=SELECT DISTINCT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE (`Bind`.`referring_user_id` = ? OR `Bind`.`referring_user_screen_name` = ?) AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`created_at` DESC LIMIT 0,40
+SHOW_2=SELECT DISTINCT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE (`Bind`.`referred_user_id` = ? OR `Bind`.`referred_screen_name` = ?) AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`created_at` DESC LIMIT 0,40
+SHOW_3=SELECT DISTINCT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE (`Bind`.`referring_user_id` = ? OR `Bind`.`referring_screen_name` = ?) AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`created_at` DESC LIMIT 0,40
+SEARCH_0_NP=SELECT DISTINCT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE ({}) AND {} ORDER BY `Tweet`.`created_at` DESC LIMIT 0,40
+SEARCH_1_NP=((`Tweet`.`user_id` = ? OR `Tweet`.`screen_name` = ?) AND `Tweet`.`flag` & ? = ?)
+SEARCH_2_NP=((`Bind`.`referred_user_id` = ? OR `Bind`.`referred_screen_name` = ?) AND `Bind`.`flag` & ? = ?)
+SEARCH_3_NP=((`Bind`.`referring_user_id` = ? OR `Bind`.`referring_screen_name` = ?) AND `Bind`.`flag` & ? = ?)
+SEARCH_4_NP=`Tweet`.`text` = ?
+SEARCH_5_NP=`Tweet`.`text` LIKE ?
+SEARCH_6_NP=`Tweet`.`text` REGEXP ?
 
 [Memcached]
 HOST=127.0.0.1:11211
@@ -119,7 +130,7 @@ EOF
 		DBI =>DBI->connect(sprintf("dbi:mysql:database=%s;host=%s;port=%d",@{$C->{MySQL}}{qw(DATABASE HOST PORT)}),@{$C->{MySQL}}{qw(USERNAME PASSWORD)}),
 		Cache::Memcached =>Cache::Memcached::libmemcached->new({servers =>[split(/ /o,$C->{Memcached}->{HOST})]}),
 	};
-	for(grep(/_[0-9]$/,keys(%{$C->{MySQL}}))){
+	for(grep(/_[0-9]$/ && !/_NP$/o,keys(%{$C->{MySQL}}))){
 		$B->{"DBT_".$_} = $B->{DBI}->prepare($C->{MySQL}->{$_});
 	}
 	$B->{DBT_INIT_0}->execute();
@@ -192,7 +203,7 @@ if(defined($ENV{GATEWAY_INTERFACE})){
 		[
 			[qr/./,\&cb_prepare],
 			[qr/^\/?$/,\&cb_index],
-			[qr/^\/(\w+)(?:\.([a-z]+))?(?:\/([fgjmrs]))?\/?$/,\&cb_show],
+			[qr/^\/(\w+)(?:\.([a-z]+))?(?:\/([aefjmrt]+))?\/?$/,\&cb_show],
 		],
 		CGI::Session =>["driver:memcached",undef,{Memcached =>$B->{Cache::Memcached}}],
 		Text::Xslate =>[path =>[split(/ /o,$C->{_}->{TEMPLATE})],cache_dir =>$C->{_}->{CACHE_DIR}],
@@ -222,9 +233,10 @@ given(shift(@ARGV)){
 			my $screen_name = shift() // screen_name($user_id);
 			my $order = shift() // "UNKNOWN.".uc((caller(0))[3]);
 			my $priority = shift() // I_PRIORITY_MIDIUM;
+			my $atime = shift() // 0;
 			my $flag = shift() | F_QUEUE;
 
-			if(!&get_queue($user_id,$order,$flag) && !$B->{DBT_CLI_QI_2}->execute($user_id,$screen_name,$order,$priority,$flag)){
+			if(!&get_queue($user_id,$order,$flag) && !$B->{DBT_CLI_QI_2}->execute($user_id,$screen_name,$order,$priority,$atime,$flag)){
 				return();
 			}
 			return(1);
@@ -243,6 +255,10 @@ given(shift(@ARGV)){
 				#&new_queue($user_id,$screen_name,"SALVAGE.MENTION",I_PRIORITY_HIGH,F_REPLIES);
 				#&new_queue($user_id,$screen_name,"SALVAGE.RETWEETED",I_PRIORITY_HIGH,F_RETWEETED);
 				#&new_queue($user_id,$screen_name,"SALVAGE.FAVORITE",I_PRIORITY_HIGH,F_FAVORITES);
+				&new_queue($user_id,$screen_name,"COMPARE.TIMELINE",I_PRIORITY_HIGH,F_TWEETS);
+				&new_queue($user_id,$screen_name,"COMPARE.MENTION",I_PRIORITY_HIGH,F_REPLIES);
+				&new_queue($user_id,$screen_name,"COMPARE.RETWEETED",I_PRIORITY_HIGH,F_RETWEETED);
+				&new_queue($user_id,$screen_name,"COMPARE.FAVORITE",I_PRIORITY_HIGH,F_FAVORITES);
 			}
 			return($user_id);
 		}
@@ -284,20 +300,20 @@ given(shift(@ARGV)){
 			[],
 			{
 				user_id =>$r->{user_id},
-				flag =>$r->{flag} & F_API,
-				axis =>{UPDATE =>1,SALVAGE =>-1}->{($r->{order} =~m/^(\w+)/o)[0]},
+				flag =>$r->{flag} & F_API_MASK,
+				axis =>{UPDATE =>1,SALVAGE =>-1,COMPARE =>-1}->{($r->{order} =~m/^(\w+)/o)[0]},
 			},
 		);
 
 		$r->{priority} = I_PRIORITY_MIDIUM;
-		if($i > 1){
-			&mod_queue($r->{id},($r->{flag} & ~F_STATE) | F_FINISH);
-			&new_queue(@{$r}{qw(user_id screen_name order priority flag)});
-		}elsif($i == 1){
-			&mod_queue($r->{id},($r->{flag} & ~F_STATE) | F_FINISH);
+		if($r->{order} =~ /^(?:UPDATE)/io){
+			&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
+			&new_queue(@{$r}{qw(user_id screen_name order priority 3600 flag)});
+		}elsif($i != 0){
+			&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
+			&new_queue(@{$r}{qw(user_id screen_name order priority 0 flag)});
 		}else{
-			&mod_queue($r->{id},($r->{flag} & ~F_STATE) | F_FAILURE);
-			&new_queue(@{$r}{qw(user_id screen_name order priority flag)});
+			&mod_queue($r->{id},($r->{flag} & ~F_STATE) | F_FINISH);
 		}
 
 		printf("[Queue%d] Salvaged %d tweets.\n",$r->{id},$i);
@@ -311,7 +327,7 @@ given(shift(@ARGV)){
 	}
 	when("--twilog"){
 		for my $structure (keys(%{XMLin(shift(@ARGV))->{tweet}})){
-			if($B->{SALVAGE_9}->execute($structure) == 0){
+			if($B->{SALVAGE_10}->execute($structure) == 0){
 				print $structure."\n";
 			}
 		}
@@ -330,29 +346,23 @@ sub salvage
 	{
 		my $status_id = shift();
 		my $referring_user_id = shift();
-		my $referring_user_screen_name = shift();
+		my $referring_screen_name = shift();
 		my $referred_user_id = shift();
-		my $referred_user_screen_name = shift();
+		my $referred_screen_name = shift();
 		my $flag = shift();
 
-		if($B->{DBT_SALVAGE_7}->execute($status_id,$referring_user_id,$referring_user_screen_name,$referred_user_id,$referred_user_screen_name,$flag,$flag) > 0){
-			return();
-		}elsif($B->{DBT_SALVAGE_8}->execute($status_id,$referring_user_id,$referring_user_screen_name,$referred_user_id,$referred_user_screen_name,$flag,$flag) == 0){
-			return();
+		if($B->{DBT_SALVAGE_7}->execute($status_id,$referring_user_id,$referring_screen_name,$referred_user_id,$referred_screen_name,$flag & F_TYPE_MASK,$flag & F_TYPE_MASK) > 0){
+			if($B->{DBT_SALVAGE_9}->execute($flag,$status_id,$referring_user_id,$referring_screen_name,$referred_user_id,$referred_screen_name,$flag & F_TYPE_MASK,$flag & F_TYPE_MASK) == 0){
+				return();
+			}
+		}else{
+			if($B->{DBT_SALVAGE_8}->execute($status_id,$referring_user_id,$referring_screen_name,$referred_user_id,$referred_screen_name,$flag & F_TYPE_MASK,$flag) == 0){
+				return();
+			}
 		}
 		return(1);
 	}
-
-	my $q = shift();
-	my $m = shift();
-	my $d = shift();
-	my $g = shift();
-	my($screen_name) = @{$q};
-	my($screen_name,$issue) = @{$m};
-	my($user_id,$flag,$axis) = @{$g}{qw(user_id flag axis)};
-	$user_id //= user_id($screen_name);
-
-	sub getedge
+	sub edge
 	{
 		my $user_id = shift();
 		my $flag = shift();
@@ -360,7 +370,7 @@ sub salvage
 
 		my $g = $axis ? "since_id" : "max_id";
 		my $i;
-		given($flag){
+		given($flag & F_API_MASK){
 			when(F_TWEETS){
 				$i = $axis ? 0 : 1;
 			}
@@ -380,25 +390,35 @@ sub salvage
 		return($B->{DBT_SALVAGE_.$i}->fetchrow_array());
 	}
 
+	my $q = shift();
+	my $m = shift();
+	my $d = shift();
+	my $g = shift();
+	my($screen_name) = @{$q};
+	my($screen_name,$issue) = @{$m};
+	my($user_id,$flag,$axis) = @{$g}{qw(user_id flag axis)};
+	$user_id //= user_id($screen_name);
+	$flag = $flag | F_SYNCHRONIZED;
+
 	my $r = [];
-	given($flag){
+	given($flag & F_API_MASK){
 		when(F_TWEETS){
-			if(!($r = $B->{Net::Twitter}->user_timeline({id =>$user_id,&getedge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
+			if(!($r = $B->{Net::Twitter}->user_timeline({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
 				return(-1);
 			}
 		}
 		when(F_REPLIES){
-			if(!($r = $B->{Net::Twitter}->mentions({id =>$user_id,&getedge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
+			if(!($r = $B->{Net::Twitter}->mentions({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
 				return(-1);
 			}
 		}
 		when(F_RETWEETED){
-			if(!($r = $B->{Net::Twitter}->retweets_of_me({id =>$user_id,&getedge($user_id,$flag,$axis),count =>200,include_entities =>1}))){
+			if(!($r = $B->{Net::Twitter}->retweets_of_me({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,include_entities =>1}))){
 				return(-1);
 			}
 		}
 		when(F_FAVORITES){
-			if(!($r = $B->{Net::Twitter}->favorites({id =>$user_id,&getedge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
+			if(!($r = $B->{Net::Twitter}->favorites({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
 				return(-1);
 			}
 		}
@@ -412,7 +432,7 @@ sub salvage
 		my $flag = $flag;
 		my @flag;
 
-		given($flag){
+		given($flag & F_API_MASK){
 			when(F_TWEETS){
 				if($structure->{text} =~ /^RT \@([0-9A-Za-z_]{1,15}):/o){
 					push(@flag,F_RETWEETS);
@@ -493,7 +513,10 @@ sub salvage
 			}
 			when(F_RETWEETED){
 				for my $i (0..15){
-					my $r = $B->{Net::Twitter}->retweeted_by({id =>$structure->{id},count =>200,page =>$i,include_entities =>1});
+					my $r;
+					if(!($r = $B->{Net::Twitter}->retweeted_by({id =>$structure->{id},count =>200,page =>$i,include_entities =>1}))){
+						return(-1);
+					}
 					if(ref($r) && $#{$r} != -1){
 						for(@{$r}){
 							&bind(
@@ -625,10 +648,11 @@ sub cb_show
 {
 	my $q = shift();
 	my $m = shift();
+	$m->[2] //= join(undef,split(/ /o,$GET{m}),"t");
 	my $d = shift();
 	my $g = shift();
-	my($screen_name,$page) = @{$q};
-	my($screen_name,$issue) = @{$m};
+	my($screen_name) = @{$q};
+	my($screen_name,$issue,$page) = @{$m};
 	my $user_id = user_id($screen_name);
 
 	my $r = {};
@@ -659,57 +683,102 @@ sub cb_show
 
 		return($g);
 	}
-	if(!defined($page)){
-		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."timeline"))){
-			if(!$B->{DBT_SHOW_1}->execute($user_id,$screen_name,F_TWEETS,F_TWEETS)){
+
+	if($r->{STATIC} = keys(%GET) == 0 && length($page) == 1){
+		if($page eq "t"){
+			if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign.$page))){
+				if(!$B->{DBT_SHOW_1}->execute($user_id,$screen_name,F_TWEETS,F_TWEETS)){
+				}
+				map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_1}->fetchall_arrayref({})};
+				#$B->{Cache::Memcached}->set($sign.$page,$r->{status},$C->{_}->{CACHE_EXPIRE});
 			}
-			map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_1}->fetchall_arrayref({})};
-			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
-		}
-	}elsif($page eq "m"){
-		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."reply"))){
-			if(!$B->{DBT_SHOW_2}->execute($user_id,$screen_name,F_REPLIES,F_REPLIES)){
+		}elsif($page eq "m"){
+			if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign.$page))){
+				if(!$B->{DBT_SHOW_2}->execute($user_id,$screen_name,F_REPLIES,F_REPLIES)){
+				}
+				map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_2}->fetchall_arrayref({})};
+				#$B->{Cache::Memcached}->set($sign.$page,$r->{status},$C->{_}->{CACHE_EXPIRE});
 			}
-			map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_2}->fetchall_arrayref({})};
-			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
-		}
-	}elsif($page eq "f"){
-		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."reply"))){
-			if(!$B->{DBT_SHOW_3}->execute($user_id,$screen_name,F_FAVORITES,F_FAVORITES)){
+		}elsif($page eq "f"){
+			if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign.$page))){
+				if(!$B->{DBT_SHOW_3}->execute($user_id,$screen_name,F_FAVORITES,F_FAVORITES)){
+				}
+				map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_3}->fetchall_arrayref({})};
+				#$B->{Cache::Memcached}->set($sign.$page,$r->{status},$C->{_}->{CACHE_EXPIRE});
 			}
-			map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_3}->fetchall_arrayref({})};
-			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
-		}
-	}elsif($page eq "g"){
-		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."reply"))){
-			if(!$B->{DBT_SHOW_2}->execute($user_id,$screen_name,F_FAVORITES,F_FAVORITES)){
+		}elsif($page eq "a"){
+			if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign.$page))){
+				if(!$B->{DBT_SHOW_2}->execute($user_id,$screen_name,F_FAVORITED,F_FAVORITED)){
+				}
+				map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_2}->fetchall_arrayref({})};
+				#$B->{Cache::Memcached}->set($sign.$page,$r->{status},$C->{_}->{CACHE_EXPIRE});
 			}
-			map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_2}->fetchall_arrayref({})};
-			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
-		}
-	}elsif($page eq "r"){
-		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."reply"))){
-			if(!$B->{DBT_SHOW_3}->execute($user_id,$screen_name,F_RETWEETS,F_RETWEETS)){
+		}elsif($page eq "r"){
+			if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign.$page))){
+				if(!$B->{DBT_SHOW_3}->execute($user_id,$screen_name,F_RETWEETS,F_RETWEETS)){
+				}
+				map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_3}->fetchall_arrayref({})};
+				#$B->{Cache::Memcached}->set($sign.$page,$r->{status},$C->{_}->{CACHE_EXPIRE});
 			}
-			map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_3}->fetchall_arrayref({})};
-			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
-		}
-	}elsif($page eq "s"){
-		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."reply"))){
-			if(!$B->{DBT_SHOW_2}->execute($user_id,$screen_name,F_RETWEETED,F_RETWEETED)){
+		}elsif($page eq "e"){
+			if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign.$page))){
+				if(!$B->{DBT_SHOW_2}->execute($user_id,$screen_name,F_RETWEETED,F_RETWEETED)){
+				}
+				map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_2}->fetchall_arrayref({})};
+				#$B->{Cache::Memcached}->set($sign.$page,$r->{status},$C->{_}->{CACHE_EXPIRE});
 			}
-			map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_SHOW_2}->fetchall_arrayref({})};
-			#$B->{Cache::Memcached}->set($sign."timeline",$r->{status},$C->{_}->{CACHE_EXPIRE});
-		}
-	}elsif($page eq "j"){
-		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign."queue"))){
-			if(!$B->{DBT_SHOW_0}->execute($user_id,$screen_name)){
+		}elsif($page eq "j"){
+			if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign.$page))){
+				if(!$B->{DBT_SHOW_0}->execute($user_id,$screen_name)){
+				}
+				map{
+	1;
+				}@{$r->{queue} = $B->{DBT_SHOW_0}->fetchall_arrayref({})};
+				#$B->{Cache::Memcached}->set($sign.$page,$r->{status},$C->{_}->{CACHE_EXPIRE});
 			}
-			map{
-1;
-			}@{$r->{queue} = $B->{DBT_SHOW_0}->fetchall_arrayref({})};
-			#$B->{Cache::Memcached}->set($sign."queue",$r->{status},$C->{_}->{CACHE_EXPIRE});
 		}
+	}else{
+		my $query = $C->{MySQL}->{SEARCH_0_NP};
+		my @cond;
+		my @bind;
+		my @word;
+
+		if($page =~ /t/o){
+			push(@cond,$C->{MySQL}->{SEARCH_1_NP});
+			push(@bind,$user_id,$screen_name,F_TWEETS,F_TWEETS);
+		}
+		if($page =~ /m/o){
+			push(@cond,$C->{MySQL}->{SEARCH_2_NP});
+			push(@bind,$user_id,$screen_name,F_REPLIES,F_REPLIES);
+		}
+		if($page =~ /f/o){
+			push(@cond,$C->{MySQL}->{SEARCH_3_NP});
+			push(@bind,$user_id,$screen_name,F_FAVORITES,F_FAVORITES);
+		}
+		if($page =~ /a/o){
+			push(@cond,$C->{MySQL}->{SEARCH_2_NP});
+			push(@bind,$user_id,$screen_name,F_FAVORITED,F_FAVORITED);
+		}
+		if($page =~ /r/o){
+			push(@cond,$C->{MySQL}->{SEARCH_3_NP});
+			push(@bind,$user_id,$screen_name,F_RETWEETS,F_RETWEETS);
+		}
+		if($page =~ /e/o){
+			push(@cond,$C->{MySQL}->{SEARCH_3_NP});
+			push(@bind,$user_id,$screen_name,F_RETWEETED,F_RETWEETED);
+		}
+
+		for(split(/\s+/o,$GET{grep})){
+			push(@word,$C->{MySQL}->{SEARCH_5_NP});
+			push(@bind,"%".$_."%");
+		}
+
+		my $cond = join(" OR ",@cond) // 0;
+		my $word = join(" AND ",@word) || 1;
+		$query =~s/{}/$cond/o;
+		$query =~s/{}/$word/o;
+
+		map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBI}->selectall_arrayref($query,{Slice =>{}},@bind)};
 	}
 
 	return($issue ? $issue : "Text::Xslate",$r,data =><<'EOF');
@@ -756,8 +825,16 @@ th,td {
 }
 .menu {
 	margin:0px 0px 0px 0px;
-	padding:0px 0px 0px 0px;
+	padding:0px 0px 8px 0px;
 	width:<:MENU_WIDTH:>px;
+	border-left:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#<:$profile_sidebar_fill_color:>;
+}
+.form {
+	margin:0px 0px 0px 0px;
+	padding:8px 4px 8px 4px;
+	width:<:MENU_WIDTH - 8:>px;
 	border-left:solid 1px #<:$profile_sidebar_border_color:>;
 	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
 	background-color:#<:$profile_sidebar_fill_color:>;
@@ -776,7 +853,7 @@ th,td {
 .tab
 {
 	margin:0px <:MENU_WIDTH - TAB_WIDTH:>px -1px -1px;
-	padding:6px 0px 6px 0px;
+	padding:6px 0px 6px 16px;
 	border:solid 1px #<:$profile_sidebar_border_color:>;
 }
 .act
@@ -789,6 +866,12 @@ th,td {
 	padding:0px 0px 0px 0px;
 	width:<:SCREEN - MENU_WIDTH - 3:>px;
 	background-color:#FFFFFF;
+}
+.search_form {
+	margin:8px 8px 8px 8px;
+	padding:12px 8px 0px 8px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#<:$profile_sidebar_fill_color:>;
 }
 .timeline_name {
 	margin:0px 8px 0px 4px;
@@ -822,19 +905,41 @@ th,td {
 			&nbsp;&nbsp;#<span id="id"><:$id:></span><br>
 			&nbsp;&nbsp;@<span id="screen_name"><:$screen_name:><br>
 		</div>
-		<div class="tab<:$MATCH[2] == nil ? " act" : "":>"><a href="/<:$screen_name:>">ついっと</a></div>
-		<div class="tab<:$MATCH[2] == "r" ? " act" : "":>"><a href="/<:$screen_name:>/r">りついっと した</a></div>
-		<div class="tab<:$MATCH[2] == "s" ? " act" : "":>"><a href="/<:$screen_name:>/s">りついっと された</a></div>
-		<div class="tab<:$MATCH[2] == "m" ? " act" : "":>"><a href="/<:$screen_name:>/m">@<:$screen_name:></a></div>
-		<div class="tab<:$MATCH[2] == "f" ? " act" : "":>"><a href="/<:$screen_name:>/f"><span style="color: yellow;">&#9733; した</span></a></div>
-		<div class="tab<:$MATCH[2] == "g" ? " act" : "":>"><a href="/<:$screen_name:>/g"><span style="color: yellow;">&#9733; された</span></a></div>
-		<div class="tab<:$MATCH[2] == "j" ? " act" : "":>"><a href="/<:$screen_name:>/j">きゅー</a></div>
+		<div class="tab<:$STATIC && $MATCH[2] == "t" ? " act" : "":>"><a href="/<:$screen_name:>">ついっと</a></div>
+		<div class="tab<:$STATIC && $MATCH[2] == "m" ? " act" : "":>"><a href="/<:$screen_name:>/m">@<:$screen_name:></a></div>
+		<div class="tab<:$STATIC && $MATCH[2] == "r" ? " act" : "":>"><a href="/<:$screen_name:>/r">りついっと した</a></div>
+		<div class="tab<:$STATIC && $MATCH[2] == "e" ? " act" : "":>"><a href="/<:$screen_name:>/e">りついっと された</a></div>
+		<div class="tab<:$STATIC && $MATCH[2] == "f" ? " act" : "":>"><a href="/<:$screen_name:>/f"><span style="color: yellow;">&#9733; した</span></a></div>
+		<div class="tab<:$STATIC && $MATCH[2] == "a" ? " act" : "":>"><a href="/<:$screen_name:>/a"><span style="color: yellow;">&#9733; された</span></a></div>
+		<div class="tab<:!$STATIC ? " act" : "":>"><a href="/<:$screen_name:>/g">けんさく</a></div>
+		<div class="tab<:$STATIC && $MATCH[2] == "j" ? " act" : "":>"><a href="/<:$screen_name:>/j">きゅー</a></div>
+	</div>
+	<div class="menu form">
+		<form method="GET" action="/<:$screen_name:>">
+			<input type="text" size="16" name="" value="">
+			<input type="submit" name="" value="...">
+		</form>
 	</div>
 	<div class="">
 		<img src="/img/a.png">
 	</div>
 	</div>
 	<div class="main pile">
+		<div class="search_form">
+			<form class="">
+				けんさく&nbsp;<input type="text" size="40" name="grep" value="">
+				普通<input type="radio" name="re" value="0"<:$GET.re ? "" : " checked":>>
+				正規表現<input type="radio" name="re" value="1"<:$GET.re ? "checked" : "":>>
+				<input type="submit" name="" value="発動">
+				<br>
+				ついっと<input type="checkbox" name="m" value="t"<:$MATCH[2] ~~ "/t/" ? " checked" : "":>>
+				@<:$screen_name:><input type="checkbox" name="m" value="a"<:$MATCH[2] ~~ "a" ? " checked" : "":>>
+				りついっと した<input type="checkbox" name="m" value="m"<:$MATCH[2] ~~ "m" ? " checked" : "":>>
+				りついっと された<input type="checkbox" name="m" value="r"<:$MATCH[2] ~~ "r" ? " checked" : "":>>
+				<span style="color: yellow;">&#9733; した</span><input type="checkbox" name="m" value="e"<:$MATCH[2] ~~ "e" ? " checked" : "":>>
+				<span style="color: yellow;">&#9733; された</span></a><input type="checkbox" name="m" value="f"<:$MATCH[2] ~~ "f" ? " checked" : "":>>
+			</form>
+		</div>
 :if $MATCH[2] != "j" {
 :for $status -> $status {
 		<div class="">
