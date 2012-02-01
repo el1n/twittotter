@@ -130,6 +130,17 @@ SEARCH_6_NP=`Tweet`.`text` REGEXP ?
 SEARCH_7_NP=YEAR(`Tweet`.`created_at`) = ?
 SEARCH_8_NP=MONTH(`Tweet`.`created_at`) = ?
 SEARCH_9_NP=DAY(`Tweet`.`created_at`) = ?
+#SEARCH_10_NP=YEAR(`Tweet`.`created_at`) >= ?
+#SEARCH_11_NP=MONTH(`Tweet`.`created_at`) >= ?
+#SEARCH_12_NP=DAY(`Tweet`.`created_at`) >= ?
+#SEARCH_13_NP=YEAR(`Tweet`.`created_at`) <= ?
+#SEARCH_14_NP=MONTH(`Tweet`.`created_at`) <= ?
+#SEARCH_15_NP=DAY(`Tweet`.`created_at`) <= ?
+SEARCH_16_NP=UNIX_TIMESTAMP(DATE(`Tweet`.`created_at`)) >= UNIX_TIMESTAMP(?)
+SEARCH_17_NP=UNIX_TIMESTAMP(`Tweet`.`created_at`) >= UNIX_TIMESTAMP(?)
+SEARCH_18_NP=UNIX_TIMESTAMP(DATE(`Tweet`.`created_at`)) < UNIX_TIMESTAMP(DATE_ADD(?,INTERVAL 1 YEAR))
+SEARCH_19_NP=UNIX_TIMESTAMP(DATE(`Tweet`.`created_at`)) < UNIX_TIMESTAMP(DATE_ADD(?,INTERVAL 1 MONTH))
+SEARCH_20_NP=UNIX_TIMESTAMP(DATE(`Tweet`.`created_at`)) < UNIX_TIMESTAMP(DATE_ADD(?,INTERVAL 1 DAY))
 
 [Memcached]
 HOST=127.0.0.1:11211
@@ -218,7 +229,7 @@ if(defined($ENV{GATEWAY_INTERFACE})){
 		[
 			[qr/./,\&cb_prepare],
 			[qr/^\/?$/,\&cb_index],
-			[qr/^\/(\w+)(?:\.([a-z]+))?(?:\/([a-z]+))?(?:\/(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?(?:\/(\d+))?\/?$/,\&cb_show],
+			[qr/^(\/(\w+)(?:\.([a-z]+))?(?:\/([a-z]+))?(?:\/(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?(\-)?(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?)?)(?:\/(\d+))?\/?$/,\&cb_show],
 		],
 		CGI::Session =>["driver:memcached",undef,{Memcached =>$B->{Cache::Memcached}}],
 		Text::Xslate =>[path =>[split(/ /o,$C->{_}->{TEMPLATE})],cache_dir =>$C->{_}->{CACHE_DIR},module =>[qw(Text::Xslate::Bridge::Star Calendar::Simple)]],
@@ -301,25 +312,29 @@ given(shift(@ARGV)){
 		}
 		my $r = $B->{DBT_CLI_QE_0}->fetchrow_hashref();
 
+		&mod_queue($r->{id},($r->{flag} & ~F_STATE) | F_PROCESS);
+
 		local %SES;
 		@SES{qw(user_id screen_name ACCESS_TOKEN ACCESS_TOKEN_SECRET)} = @{$r}{qw(user_id screen_name ACCESS_TOKEN ACCESS_TOKEN_SECRET)};
 
-		&cb_prepare(
+		my $i = -1;
+		if(&cb_prepare(
 			[],
 			[],
 			[],
-			{},
-		);
-		my $i = &salvage(
-			[$r->{screen_name}],
-			[$r->{screen_name}],
-			[],
-			{
-				user_id =>$r->{user_id},
-				flag =>$r->{flag} & F_API_MASK,
-				axis =>{UPDATE =>1,SALVAGE =>-1,COMPARE =>-1}->{($r->{order} =~m/^(\w+)/o)[0]},
-			},
-		);
+			{regular =>1},
+		)){
+			$i = &salvage(
+				[$r->{screen_name}],
+				[undef,$r->{screen_name}],
+				[],
+				{
+					user_id =>$r->{user_id},
+					flag =>$r->{flag} & F_API_MASK,
+					axis =>{UPDATE =>1,SALVAGE =>-1,COMPARE =>-1}->{($r->{order} =~m/^(\w+)/o)[0]},
+				},
+			);
+		}
 
 		if($r->{order} =~ /^(?:UPDATE)/io){
 			$r->{priority} = I_PRIORITY_LOW;
@@ -417,7 +432,7 @@ sub salvage
 	my $d = shift();
 	my $g = shift();
 	my($screen_name) = @{$q};
-	my($screen_name,$issue) = @{$m};
+	my($location,$screen_name,$issue) = @{$m};
 	my($user_id,$flag,$axis) = @{$g}{qw(user_id flag axis)};
 	$user_id //= user_id($screen_name);
 	$flag = $flag | F_SYNCHRONIZED;
@@ -677,18 +692,7 @@ sub cb_prepare
 	my $d = shift();
 	my $g = shift();
 	my($screen_name,$page) = @{$q};
-	my($screen_name,$issue) = @{$m};
-
-	my $time = time();
-	my @time = localtime($time);
-	$SES{u} = $time;
-	$SES{s} = $time[0];
-	$SES{n} = $time[1];
-	$SES{h} = $time[2];
-	$SES{d} = $time[3];
-	$SES{m} = $time[4] + 1;
-	$SES{y} = $time[5] + 1900;
-	$SES{w} = $time[6];
+	my($location,$screen_name,$issue) = @{$m};
 
 	if($SES{ACCESS_TOKEN} && $SES{ACCESS_TOKEN_SECRET}){
 		$B->{Net::Twitter} = Net::Twitter->new(
@@ -701,6 +705,9 @@ sub cb_prepare
 		);
 	}
 	if(!$B->{Net::Twitter}){
+		if($g->{regular}){
+			return();
+		}
 		$B->{Net::Twitter} = Net::Twitter->new(
 			traits =>[qw(API::REST API::Search OAuth WrapError RetryOnError)],
 			consumer_key =>$C->{Twitter}->{CONSUMER_KEY},
@@ -710,7 +717,7 @@ sub cb_prepare
 			max_retries =>2,
 		);
 	}
-	return();
+	return(1);
 }
 
 sub cb_index
@@ -771,16 +778,21 @@ sub cb_show
 {
 	my $q = shift();
 	my $m = shift();
-	$m->[2] //= "t";
+	$m->[3] .= $GET{c};
+	$m->[3] ||= "t";
+	$m->[4] //= $GET{"y-"};
+	$m->[5] //= $GET{"m-"};
+	$m->[6] //= $GET{"d-"};
+	$m->[8] //= defined($m->[7]) ? undef : $GET{"-y"} || $m->[4];
+	$m->[9] //= defined($m->[7]) ? undef : $GET{"-m"} || $m->[5];
+	$m->[10] //= defined($m->[7]) ? undef : $GET{"-d"} || $m->[6];
+	$m->[7] //= $m->[3] =~ /s/o ? "-" : undef;
 	my $d = shift();
 	my $g = shift();
 	my($screen_name) = @{$q};
-	my($screen_name,$issue,$clause,@g) = @{$m};
-	$m->[3] //= $GET{y};
-	$m->[4] //= $GET{m};
-	$m->[5] //= $GET{d};
+	my($location,$screen_name,$issue,$clause,@g) = @{$m};
 	my $user_id = user_id($screen_name);
-	$clause .= $GET{c};
+	#$clause .= $GET{c};
 
 	my $r;
 	my $sign = join(".",$C->{_}->{CACHE_PREFIX},$screen_name).".";
@@ -848,10 +860,31 @@ sub cb_show
 		my @where_char;
 		my @bind;
 
-		for my $i (0..2){
-			if($g[$i] > 0){
-				push(@where_time,$C->{MySQL}->{SEARCH_.(7 + $i)._NP});
-				push(@bind,$g[$i]);
+		if($g[0] > 0){
+			if(defined($g[3])){
+				push(@where_time,$C->{MySQL}->{SEARCH_17_NP});
+				push(@bind,join("-",$g[0],$g[1] || 1,$g[2] || 1));
+			}else{
+				for my $i (0..2){
+					if($g[$i] > 0){
+						push(@where_time,$C->{MySQL}->{SEARCH_.(7 + $i)._NP});
+						push(@bind,$g[$i]);
+					}
+				}
+			}
+		}
+		if($g[4] > 0){
+			if(defined($g[3])){
+				if(defined($g[6])){
+					push(@where_time,$C->{MySQL}->{SEARCH_20_NP});
+					push(@bind,join("-",$g[4],$g[5] || 1,$g[6] || 1));
+				}elsif(defined($g[5])){
+					push(@where_time,$C->{MySQL}->{SEARCH_19_NP});
+					push(@bind,join("-",$g[4],$g[5] || 1,$g[6] || 1));
+				}else{
+					push(@where_time,$C->{MySQL}->{SEARCH_18_NP});
+					push(@bind,join("-",$g[4],$g[5] || 1,$g[6] || 1));
+				}
 			}
 		}
 		for(qw(t m r e q u f a i)){
@@ -886,7 +919,7 @@ sub cb_show
 			$#where_time != -1 ? join(" AND ",@where_time) : 1,
 			$#where_base != -1 ? join(" OR ",@where_base) : 0,
 			$#where_char != -1 ? join(" AND ",@where_char) : 1,
-			$g[3] < 1 ? 0 : ($g[3] - 1) * $C->{_}->{LIMIT},
+			$g[7] < 1 ? 0 : ($g[7] - 1) * $C->{_}->{LIMIT},
 			$C->{_}->{LIMIT},
 		);
 
@@ -903,6 +936,24 @@ sub cb_show
 		}
 	}
 	$r->{rows} = pop(@{$r->{status}});
+
+	my $time = time();
+	my @time = localtime($time);
+	$r->{BORROW} = {
+		location =>$location,
+		u =>$time,
+		s =>$time[0],
+		n =>$time[1],
+		h =>$time[2],
+		d =>$time[3],
+		m =>$time[4] + 1,
+		y =>$time[5] + 1900,
+		w =>$time[6],
+		cal =>{
+			m =>$m->[9] // $GET{"m-"} // ($m->[8] ? 12 : $time[4] + 1),
+			y =>$m->[8] // $GET{"y-"} // $time[5] + 1900,
+		},
+	};
 
 	return($issue ? $issue : "Text::Xslate",$r // {},data =><<'EOF');
 : constant SCREEN = 800
@@ -1006,11 +1057,20 @@ th,td {
 	width:<:SCREEN - MENU_WIDTH - 3:>px;
 	background-color:#FFFFFF;
 }
-.search_form {
+.search {
 	margin:8px 8px 8px 8px;
 	padding:12px 8px 0px 8px;
 	border:solid 1px #<:$profile_sidebar_border_color:>;
 	background-color:#<:$profile_sidebar_fill_color:>;
+}
+.search table {
+	margin:8px auto 0px 0px;
+}
+.search th,.search td {
+	border:none;
+	text-align:right;
+	font-size:<:FONT_SIZE - 1:>pt;
+	font-weight:normal;
 }
 .timeline_name {
 	margin:0px 8px 0px 4px;
@@ -1048,22 +1108,21 @@ th,td {
 			&nbsp;&nbsp;#<span id="id"><:$id:></span><br>
 			&nbsp;&nbsp;@<span id="screen_name"><:$screen_name:></span><br>
 		</div>
-		<div class="tab<:$STATIC && $MATCH[2] == "t" ? " act" : "":>"><a href="/<:$screen_name:>">ついっと</a></div>
-		<div class="tab<:$STATIC && $MATCH[2] == "m" ? " act" : "":>"><a href="/<:$screen_name:>/m">@<:$screen_name:></a></div>
-		<div class="tab<:$STATIC && $MATCH[2] == "r" ? " act" : "":>"><a href="/<:$screen_name:>/r">りついっと した</a></div>
-		<div class="tab<:$STATIC && $MATCH[2] == "e" ? " act" : "":>"><a href="/<:$screen_name:>/e">りついっと された</a></div>
-		<div class="tab<:$STATIC && $MATCH[2] == "q" ? " act" : "":>"><a href="/<:$screen_name:>/q">くおとついっと した</a></div>
-		<div class="tab<:$STATIC && $MATCH[2] == "u" ? " act" : "":>"><a href="/<:$screen_name:>/u">くおとついっと された</a></div>
-		<div class="tab<:$STATIC && $MATCH[2] == "f" ? " act" : "":>"><a href="/<:$screen_name:>/f"><span style="color: yellow;">&#9733;</span> した</a></div>
-		<div class="tab<:$STATIC && $MATCH[2] == "a" ? " act" : "":>"><a href="/<:$screen_name:>/a"><span style="color: yellow;">&#9733;</span> された</a></div>
-		<div class="tab<:!$STATIC ? " act" : "":>"><a href="/<:$screen_name:>/s">けんさく</a></div>
-		<div class="tab<:$STATIC && $MATCH[2] == "z" ? " act" : "":>"><a href="/<:$screen_name:>/z">なにか</a></div>
-		<div class="tab<:$STATIC && $MATCH[2] == "j" ? " act" : "":>"><a href="/<:$screen_name:>/j">きゅー</a></div>
+		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "t" ? " act" : "":>"><a href="/<:$screen_name:>">ついっと</a></div>
+		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "m" ? " act" : "":>"><a href="/<:$screen_name:>/m">@<:$screen_name:></a></div>
+		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "r" ? " act" : "":>"><a href="/<:$screen_name:>/r">りついっと した</a></div>
+		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "e" ? " act" : "":>"><a href="/<:$screen_name:>/e">りついっと された</a></div>
+		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "q" ? " act" : "":>"><a href="/<:$screen_name:>/q">くおとついっと した</a></div>
+		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "u" ? " act" : "":>"><a href="/<:$screen_name:>/u">くおとついっと された</a></div>
+		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "f" ? " act" : "":>"><a href="/<:$screen_name:>/f"><span style="color: yellow;">&#9733;</span> した</a></div>
+		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "a" ? " act" : "":>"><a href="/<:$screen_name:>/a"><span style="color: yellow;">&#9733;</span> された</a></div>
+		<div class="tab<:$IS_SEARCH ? " act" : "":>"><a href="/<:$screen_name:>/s">けんさく</a></div>
+		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "j" ? " act" : "":>"><a href="/<:$screen_name:>/j">きゅー</a></div>
 		<table class="calendar">
 			<tr>
-				<th><a href="/<:$screen_name:>/<:$MATCH[2]:>/<:$MATCH[4] != 1 ? $MATCH[3] : $MATCH[3] - 1:>-<:$MATCH[4] != 1 ? $MATCH[4] - 1 : 12:>">&lt;</a></th>
-				<th colspan="5"><:$MATCH[3]:>-<:$MATCH[4]:></th>
-				<th><a href="/<:$screen_name:>/<:$MATCH[2]:>/<:$MATCH[4] != 12 ? $MATCH[3] : $MATCH[3] + 1:>-<:$MATCH[4] != 12 ? $MATCH[4] + 1 : 1:>">&gt;</a></th>
+				<th><a href="/<:$screen_name:>/<:$MATCH[3]:>/<:$BORROW.cal.m != 1 ? $BORROW.cal.y : $BORROW.cal.y - 1:>-<:$BORROW.cal.m != 1 ? $BORROW.cal.m - 1 : 12:>">&lt;</a></th>
+				<th colspan="5"><:$BORROW.cal.y:>-<:$BORROW.cal.m:></th>
+				<th><a href="/<:$screen_name:>/<:$MATCH[3]:>/<:$BORROW.cal.m != 12 ? $BORROW.cal.y : $BORROW.cal.y + 1:>-<:$BORROW.cal.m != 12 ? $BORROW.cal.m + 1 : 1:>">&gt;</a></th>
 			</tr>
 			<tr>
 				<th>日</th>
@@ -1074,10 +1133,10 @@ th,td {
 				<th>金</th>
 				<th>土</th>
 			</tr>
-:for calendar($MATCH[4],$MATCH[3]) -> $i {
+:for calendar($BORROW.cal.m,$BORROW.cal.y) -> $i {
 			<tr>
 :for $i -> $i {
-				<td><a href="/<:$screen_name:>/<:$MATCH[2]:>/<:$MATCH[3]:>-<:$MATCH[4]:>-<:$i:>"><:$i:></a></td>
+				<td><a href="/<:$screen_name:>/<:$MATCH[3]:>/<:$BORROW.cal.y:>-<:$BORROW.cal.m:>-<:$i:>"><:$i:></a></td>
 :}
 			</tr>
 :}
@@ -1095,8 +1154,8 @@ th,td {
 	</div>
 	</div>
 	<div class="main pile">
-:if $MATCH[2] == "z" {
-:}elsif $MATCH[2] == "j" {
+:if $MATCH[3] == "z" {
+:}elsif $MATCH[3] == "j" {
 		<table>
 			<tr>
 				<th></th>
@@ -1118,63 +1177,89 @@ th,td {
 :}
 		</table>
 :}else{
-		<div class="search_form">
+		<div class="search">
 			<form method="GET" action="/<:$screen_name:>/s">
-				<input type="hidden" name="c" value="<:$MATCH[2]:>">
+				<input type="hidden" name="c" value="<:$MATCH[3]:>">
 				けんさく&nbsp;<input type="text" size="40" name="grep" value="<:$GET.grep:>">
 				普通<input type="radio" name="re" value="0"<:$GET.re ? "" : " checked":>>
 				正規表現<input type="radio" name="re" value="1"<:$GET.re ? "checked" : "":>>
 				<input type="submit" name="" value="発動">
-:if $MATCH[2] == "s" {
+:if $IS_SEARCH {
 				<br>
 		<table>
 			<tr>
 				<td>ついっと</td>
-				<td><input type="checkbox" name="c" value="t"<:match($GET.c,"t") ? " checked" : "":>></td>
+				<td><input type="checkbox" name="c" value="t"<:match($MATCH[3],"t") ? " checked" : "":>></td>
 				<td>@<:$screen_name:></td>
-				<td><input type="checkbox" name="c" value="m"<:match($GET.c,"m") ? " checked" : "":>></td>
+				<td><input type="checkbox" name="c" value="m"<:match($MATCH[3],"m") ? " checked" : "":>></td>
 				<td></td>
-				<td>じかん</td>
+				<td>ひづけ</td>
 				<td>
-					<select name="y">
+					<select name="y-">
 						<option value="">*</option>
-:for [2006..$SES.y] -> $i {
-						<option value="<:$i:>"><:$i:></option>
+:for [2006..$BORROW.y] -> $i {
+						<option value="<:$i:>"<:$MATCH[4] == $i ? " selected" : "":>><:$i:></option>
 :}
 					</select>
 					-
-					<select name="m">
+					<select name="m-">
 						<option value="">*</option>
 :for [1..12] -> $i {
-						<option value="<:$i:>"><:$i:></option>
+						<option value="<:$i:>"<:$MATCH[5] == $i ? " selected" : "":>><:$i:></option>
 :}
 					</select>
 					-
-					<select name="d">
+					<select name="d-">
 						<option value="">*</option>
 :for [1..31] -> $i {
-						<option value="<:$i:>"><:$i:></option>
+						<option value="<:$i:>"<:$MATCH[6] == $i ? " selected" : "":>><:$i:></option>
 :}
 					</select>
 				</td>
+				<td>から</td>
 			</tr>
 			<tr>
 				<td>りついっと した</td>
-				<td><input type="checkbox" name="c" value="r"<:match($GET.c,"r") ? " checked" : "":>></td>
+				<td><input type="checkbox" name="c" value="r"<:match($MATCH[3],"r") ? " checked" : "":>></td>
 				<td>りついっと された</td>
-				<td><input type="checkbox" name="c" value="e"<:match($GET.c,"e") ? " checked" : "":>></td>
+				<td><input type="checkbox" name="c" value="e"<:match($MATCH[3],"e") ? " checked" : "":>></td>
+				<td></td>
+				<td></td>
+				<td>
+					<select name="-y">
+						<option value="">*</option>
+:for [2006..$BORROW.y] -> $i {
+						<option value="<:$i:>"<:$MATCH[8] == $i ? " selected" : "":>><:$i:></option>
+:}
+					</select>
+					-
+					<select name="-m">
+						<option value="">*</option>
+:for [1..12] -> $i {
+						<option value="<:$i:>"<:$MATCH[9] == $i ? " selected" : "":>><:$i:></option>
+:}
+					</select>
+					-
+					<select name="-d">
+						<option value="">*</option>
+:for [1..31] -> $i {
+						<option value="<:$i:>"<:$MATCH[10] == $i ? " selected" : "":>><:$i:></option>
+:}
+					</select>
+				</td>
+				<td>まで</td>
 			</tr>
 			<tr>
 				<td>くおとついっと した</td>
-				<td><input type="checkbox" name="c" value="q"<:match($GET.c,"q") ? " checked" : "":>></td>
+				<td><input type="checkbox" name="c" value="q"<:match($MATCH[3],"q") ? " checked" : "":>></td>
 				<td>くおとついっと した</td>
-				<td><input type="checkbox" name="c" value="u"<:match($GET.c,"u") ? " checked" : "":>></td>
+				<td><input type="checkbox" name="c" value="u"<:match($MATCH[3],"u") ? " checked" : "":>></td>
 			</tr>
 			<tr>
 				<td><span style="color: yellow;">&#9733;</span> した</td>
-				<td><input type="checkbox" name="c" value="f"<:match($GET.c,"f") ? " checked" : "":>></td>
+				<td><input type="checkbox" name="c" value="f"<:match($MATCH[3],"f") ? " checked" : "":>></td>
 				<td><span style="color: yellow;">&#9733;</span> された</td>
-				<td><input type="checkbox" name="c" value="a"<:match($GET.c,"a") ? " checked" : "":>></td>
+				<td><input type="checkbox" name="c" value="a"<:match($MATCH[3],"a") ? " checked" : "":>></td>
 			</tr>
 		</table>
 :}
@@ -1201,7 +1286,7 @@ th,td {
 			</tr>
 			<tr>
 :}
-				<td class="page"><a href="/<:$screen_name:>/<:$MATCH[2]:>/<:$i:>?<:$ENV.QUERY_STRING:>"><:$i:></a></td>
+				<td class="page"><a href="<:$BORROW.location:>/<:$i:>?<:$ENV.QUERY_STRING:>"><:$i:></a></td>
 :}
 			</tr>
 		</table>
