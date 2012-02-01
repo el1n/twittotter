@@ -814,7 +814,7 @@ sub cb_show
 		$B->{Cache::Memcached}->set($sign."profile",$r,$C->{Cache}->{PROFILE_EXPIRE});
 	}
 	$r->{IS_SEARCH} = length($clause) == 1 && $clause =~ /^[zjtmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) ? 0 : 1;
-	$r->{STATIC} = length($clause) == 1 && $clause =~ /^[zjtmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) && !defined($g[3]) ? 1 : 0;
+	$r->{STATIC} = length($clause) == 1 && $clause =~ /^[zjtmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) && !defined($g[3]) && !defined($g[4]) && !defined($g[7]) ? 1 : 0;
 
 	sub prepare_structure
 	{
@@ -823,12 +823,20 @@ sub cb_show
 		unpack_structure($g);
 		$g = $g->{structure}->{twitter};
 
-		for(@{$g->{entities}->{urls}}){
+		for(@{$g->{entities}->{urls}},@{$g->{entities}->{media}}){
 			if(defined($_->{expanded_url})){
 				#$g->{text} =~s/$_->{url}/$_->{expanded_url}/g;
 				$g->{text} =~s/$_->{url}/<a href="$_->{expanded_url}" target="_blank">$_->{expanded_url}<\/a>/g;
 			}else{
 				$g->{text} =~s/$_->{url}/<a href="$_->{url}" target="_blank">$_->{url}<\/a>/g;
+			}
+		}
+		for(@{$g->{entities}->{media}}){
+			if(defined($_->{expanded_url})){
+				#$g->{text} =~s/$_->{display_url}/$_->{expanded_url}/g;
+				$g->{text} =~s/$_->{display_url}/<a href="$_->{expanded_url}" target="_blank">$_->{expanded_url}<\/a>/g;
+			}else{
+				$g->{text} =~s/$_->{display_url}/<a href="$_->{display_url}" target="_blank">$_->{display_url}<\/a>/g;
 			}
 		}
 		#$g->{text} =~s/((?:ht|f)tps?:\/{2}[^\/]+\/[\x21-\x7E]+)/<a href="$1" target="_blank">$1<\/a>/g;
@@ -849,8 +857,7 @@ sub cb_show
 			map{
 1;
 			}@{$r->{queue} = $B->{DBT_SHOW_0}->fetchall_arrayref({})};
-			if(!$B->{DBT_SHOW_1}->execute($user_id,$screen_name)){
-			}
+			$B->{DBT_SEARCH_0}->execute();
 			push(@{$r->{queue}},($B->{DBT_SEARCH_0}->fetchrow_array())[0]);
 			$B->{Cache::Memcached}->set($sign.$clause,$r->{queue},$C->{Cache}->{QUEUE_EXPIRE});
 		}

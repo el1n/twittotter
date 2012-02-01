@@ -3,7 +3,7 @@
 -- http://www.phpmyadmin.net
 --
 -- Host: localhost
--- Generation Time: Jan 25, 2012 at 01:15 AM
+-- Generation Time: Jan 28, 2012 at 01:58 AM
 -- Server version: 5.1.52
 -- PHP Version: 5.3.3
 
@@ -22,12 +22,12 @@ SET SQL_MODE="NO_AUTO_VALUE_ON_ZERO";
 CREATE TABLE IF NOT EXISTS `Bind` (
   `status_id` bigint(20) unsigned NOT NULL,
   `referring_user_id` bigint(20) unsigned DEFAULT NULL,
-  `referring_user_screen_name` varchar(16) DEFAULT NULL,
+  `referring_screen_name` varchar(16) DEFAULT NULL,
   `referred_user_id` bigint(20) unsigned DEFAULT NULL,
-  `referred_user_screen_name` varchar(16) DEFAULT NULL,
+  `referred_screen_name` varchar(16) DEFAULT NULL,
   `flag` bigint(20) unsigned NOT NULL DEFAULT '0',
-  KEY `referring_user_id` (`referring_user_id`,`referring_user_screen_name`),
-  KEY `referred_user_id` (`referred_user_id`,`referred_user_screen_name`),
+  KEY `referring_user_id` (`referring_user_id`,`referring_screen_name`),
+  KEY `referred_user_id` (`referred_user_id`,`referred_screen_name`),
   KEY `status_id` (`status_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
@@ -44,12 +44,13 @@ CREATE TABLE IF NOT EXISTS `Queue` (
   `order` varchar(255) DEFAULT NULL,
   `flag` bigint(20) unsigned NOT NULL DEFAULT '1',
   `priority` tinyint(4) NOT NULL DEFAULT '1',
+  `atime` timestamp NOT NULL DEFAULT '0000-00-00 00:00:00',
   `mtime` timestamp NOT NULL DEFAULT '0000-00-00 00:00:00',
   `ctime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `revision` int(11) NOT NULL DEFAULT '1',
   PRIMARY KEY (`id`),
   KEY `user_id` (`user_id`,`flag`)
-) ENGINE=InnoDB  DEFAULT CHARSET=utf8 AUTO_INCREMENT=5 ;
+) ENGINE=InnoDB  DEFAULT CHARSET=utf8 AUTO_INCREMENT=117 ;
 
 -- --------------------------------------------------------
 
