@@ -19,6 +19,7 @@ use DateTime::Format::MySQL;
 use Net::Twitter;
 #use Net::Twitter::Lite;
 use Calendar::Simple;
+use BlackCurtain::Fragility;
 use constant F_NULL =>0;
 use constant F_QUEUE =>1 << 0;
 use constant F_PROCESS =>1 << 1;
@@ -155,6 +156,7 @@ EOF
 	$B = {
 		DBI =>DBI->connect(sprintf("dbi:mysql:database=%s;host=%s;port=%d",@{$C->{MySQL}}{qw(DATABASE HOST PORT)}),@{$C->{MySQL}}{qw(USERNAME PASSWORD)}),
 		Cache::Memcached =>Cache::Memcached::libmemcached->new({servers =>[split(/ /o,$C->{Memcached}->{HOST})]}),
+		BlackCurtain::Fragility =>BlackCurtain::Fragility->new(),
 	};
 	for(grep(/_[0-9]+$/ && !/_NP$/o,keys(%{$C->{MySQL}}))){
 		$B->{"DBT_".$_} = $B->{DBI}->prepare($C->{MySQL}->{$_});
@@ -227,9 +229,10 @@ sub encode_MySQLTime
 if(defined($ENV{GATEWAY_INTERFACE})){
 	BlackCurtain::Ignorance->new(
 		[
-			[qr/./,\&cb_prepare],
-			[qr/^\/?$/,\&cb_index],
-			[qr/^(\/(\w+)(?:\.([a-z]+))?(?:\/([a-z]+))?(?:\/(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?(\-)?(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?)?)(?:\/(\d+))?\/?$/,\&cb_show],
+			[qr/./,undef,\&cb_prepare],
+			[qr/^\/?$/,undef,\&cb_index],
+			[qr/^(\/(\w+))\/c\/?$/,undef,\&cb_conf],
+			[qr/^(\/(\w+)(?:\.([abd-z]+))?(?:\/([a-z]+))?(?:\/(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?(\-)?(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?)?)(?:\/(\d+))?\/?$/,16,\&cb_show],
 		],
 		CGI::Session =>["driver:memcached",undef,{Memcached =>$B->{Cache::Memcached}}],
 		Text::Xslate =>[path =>[split(/ /o,$C->{_}->{TEMPLATE})],cache_dir =>$C->{_}->{CACHE_DIR},module =>[qw(Text::Xslate::Bridge::Star Calendar::Simple)]],
@@ -691,7 +694,6 @@ sub cb_prepare
 	my $m = shift();
 	my $d = shift();
 	my $g = shift();
-	my($screen_name,$page) = @{$q};
 	my($location,$screen_name,$issue) = @{$m};
 
 	if($SES{ACCESS_TOKEN} && $SES{ACCESS_TOKEN_SECRET}){
@@ -774,6 +776,21 @@ EOF
 	return("raw","unknown op");
 }
 
+sub cb_conf
+{
+	my $q = shift();
+	my $m = shift();
+	my $d = shift();
+	my $g = shift();
+	my($screen_name) = @{$m};
+
+	if($GET{v}){
+		$SES{v} = $SES{v} ? 0 : 1;
+	}
+
+	return("jump",$ENV{HTTP_REFERER});
+}
+
 sub cb_show
 {
 	my $q = shift();
@@ -787,9 +804,9 @@ sub cb_show
 	$m->[9] //= defined($m->[7]) ? undef : $GET{"-m"} || $m->[5];
 	$m->[10] //= defined($m->[7]) ? undef : $GET{"-d"} || $m->[6];
 	$m->[7] //= $m->[3] =~ /s/o ? "-" : undef;
+	$m->[11] = $m->[11] < 1 ? 0 : $m->[11] - 1;
 	my $d = shift();
 	my $g = shift();
-	my($screen_name) = @{$q};
 	my($location,$screen_name,$issue,$clause,@g) = @{$m};
 	my $user_id = user_id($screen_name);
 	#$clause .= $GET{c};
@@ -814,7 +831,7 @@ sub cb_show
 		$B->{Cache::Memcached}->set($sign."profile",$r,$C->{Cache}->{PROFILE_EXPIRE});
 	}
 	$r->{IS_SEARCH} = length($clause) == 1 && $clause =~ /^[zjtmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) ? 0 : 1;
-	$r->{STATIC} = length($clause) == 1 && $clause =~ /^[zjtmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) && !defined($g[3]) && !defined($g[4]) && !defined($g[7]) ? 1 : 0;
+	$r->{STATIC} = length($clause) == 1 && $clause =~ /^[zjtmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) && !defined($g[3]) && !defined($g[4]) && $g[7] == 0 ? 1 : 0;
 
 	sub prepare_structure
 	{
@@ -840,7 +857,7 @@ sub cb_show
 			}
 		}
 		#$g->{text} =~s/((?:ht|f)tps?:\/{2}[^\/]+\/[\x21-\x7E]+)/<a href="$1" target="_blank">$1<\/a>/g;
-		$g->{text} =~s/(#\w+)/<a href="https:\/\/twitter.com\/#!\/search\/$1" target="_blank">$1<\/a>/g;
+		$g->{text} =~s/(?!=[^ ])(#\w+)(?![^ ])/ <a href="https:\/\/twitter.com\/#!\/search\/$1" target="_blank">$1<\/a>/g;
 		$g->{text} =~s/^RT \@([0-9A-Za-z_]{1,15}):/RT <a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>&nbsp;<a href="https:\/\/twitter.com\/#!\/$1\/status\/$g->{retweeted_status}->{id}" target="_blank">&raquo;<\/a>:/g;
 		$g->{text} =~s/^\@([0-9A-Za-z_]{1,15})/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>&nbsp;<a href="https:\/\/twitter.com\/#!\/$1\/status\/$g->{in_reply_to_status_id}" target="_blank">&raquo;<\/a>/g;
 		$g->{text} =~s/(?<!>)\@([0-9A-Za-z_]{1,15})/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>/g;
@@ -851,7 +868,7 @@ sub cb_show
 	}
 
 	if($clause eq "j"){
-		if(!defined($r->{status} = $B->{Cache::Memcached}->get($sign.$clause))){
+		if(!defined($r->{queue} = $B->{Cache::Memcached}->get($sign.$clause))){
 			if(!$B->{DBT_SHOW_0}->execute($user_id,$screen_name)){
 			}
 			map{
@@ -905,7 +922,7 @@ sub cb_show
 					q =>[2,4,F_QUOTETWEETS],
 					u =>[3,4,F_QUOTETWEETED],
 					f =>[2,4,F_FAVORITES],
-					a =>[3,4,F_FAVORITED],
+					a =>[3,4,F_FAVORITES],
 					i =>[2,4,F_TIMELINE],
 				}->{$_}};
 
@@ -926,7 +943,7 @@ sub cb_show
 			$#where_time != -1 ? join(" AND ",@where_time) : 1,
 			$#where_base != -1 ? join(" OR ",@where_base) : 0,
 			$#where_char != -1 ? join(" AND ",@where_char) : 1,
-			$g[7] < 1 ? 0 : ($g[7] - 1) * $C->{_}->{LIMIT},
+			$g[7] * $C->{_}->{LIMIT},
 			$C->{_}->{LIMIT},
 		);
 
@@ -942,11 +959,17 @@ sub cb_show
 			$B->{Cache::Memcached}->set($sign.$clause,$r->{status},$C->{Cache}->{STATIC_STATUS_EXPIRE});
 		}
 	}
-	$r->{rows} = pop(@{$r->{status}});
+	if(ref($r->{status}) eq "ARRAY"){
+		$r->{rows} = pop(@{$r->{status}});
+	}elsif(ref($r->{queue}) eq "ARRAY"){
+		$r->{rows} = pop(@{$r->{queue}});
+	}else{
+		$r->{rows} = 0;
+	}
 
 	my $time = time();
 	my @time = localtime($time);
-	$r->{BORROW} = {
+	%BORROW = (
 		location =>$location,
 		u =>$time,
 		s =>$time[0],
@@ -960,346 +983,7 @@ sub cb_show
 			m =>$m->[9] // $GET{"m-"} // ($m->[8] ? 12 : $time[4] + 1),
 			y =>$m->[8] // $GET{"y-"} // $time[5] + 1900,
 		},
-	};
+	);
 
-	return($issue ? $issue : "Text::Xslate",$r // {},data =><<'EOF');
-: constant SCREEN = 800
-: constant FONT_SIZE = 10
-: constant MENU_WIDTH = 159
-: constant TAB_WIDTH = 136
-<html>
-<head>
-<title>ついっとったー</title>
-<style type="text/css">
-body {
-	color:#<:$profile_text_color:>;
-	background-color:#<:$profile_background_color:>;
-	font-size:<:FONT_SIZE:>pt;
-	font-family:"Verdana";
-}
-a:link,a:visited,a:hover,a:active {
-	color:#<:$profile_link_color:>;
-	text-decoration:none;
-}
-
-table
-{
-	margin:12px auto 0px auto;
-}
-
-th,td {
-	border-right:solid 1px #<:$profile_sidebar_border_color:>;
-	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
-	font-size:<:FONT_SIZE:>pt;
-}
-
-.line {
-	border:solid 1px #FF0000;
-}
-.pile {
-	float:right;
-}
-.cl {
-	clear:both;
-}
-
-.overall {
-	margin:12px auto 0px auto;
-	width:<:SCREEN:>px;
-	border:solid 1px #<:$profile_sidebar_border_color:>;
-	background-color:#FFFFFF;
-}
-.menu {
-	margin:0px 0px 0px 0px;
-	padding:0px 0px 8px 0px;
-	width:<:MENU_WIDTH:>px;
-	border-left:solid 1px #<:$profile_sidebar_border_color:>;
-	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
-	background-color:#<:$profile_sidebar_fill_color:>;
-}
-.form {
-	margin:0px 0px 0px 0px;
-	padding:8px 4px 8px 4px;
-	width:<:MENU_WIDTH - 8:>px;
-	border-left:solid 1px #<:$profile_sidebar_border_color:>;
-	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
-	background-color:#<:$profile_sidebar_fill_color:>;
-}
-.inf
-{
-	margin:0px 2px 24px 4px;
-	padding:0px 0px 0px 0px;
-}
-.img
-{
-	margin:4px 4px 4px 4px;
-	padding:0px 0px 0px 0px;
-	border:solid 1px #<:$profile_sidebar_border_color:>;
-}
-.tab
-{
-	margin:0px <:MENU_WIDTH - TAB_WIDTH:>px -1px -1px;
-	padding:4px 0px 4px 16px;
-	border:solid 1px #<:$profile_sidebar_border_color:>;
-}
-.act
-{
-	border-left:solid 1px #FFFFFF;
-	background-color:#FFFFFF;
-}
-.calendar table {
-}
-.calendar th,.calendar td {
-	width:16px;
-	text-align:center;
-	font-size:<:FONT_SIZE - 1:>pt;
-	font-weight:normal;
-}
-.calendar td {
-	background-color:#FFFFFF;
-}
-.main {
-	margin:0px 0px 0px 0px;
-	padding:0px 0px 0px 0px;
-	width:<:SCREEN - MENU_WIDTH - 3:>px;
-	background-color:#FFFFFF;
-}
-.search {
-	margin:8px 8px 8px 8px;
-	padding:12px 8px 0px 8px;
-	border:solid 1px #<:$profile_sidebar_border_color:>;
-	background-color:#<:$profile_sidebar_fill_color:>;
-}
-.search table {
-	margin:8px auto 0px 0px;
-}
-.search th,.search td {
-	border:none;
-	text-align:right;
-	font-size:<:FONT_SIZE - 1:>pt;
-	font-weight:normal;
-}
-.timeline_name {
-	margin:0px 8px 0px 4px;
-	padding:2px 0px 2px 0px;
-}
-.timeline_text {
-	margin:0px 24px 0px 8px;
-	padding:0px 0px 2px 0px;
-	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
-}
-.page {
-	width:24px;
-	text-align:center;
-}
-.screen_name {
-	color:#333333;
-	font-weight:bold;
-}
-.name {
-	color:#666666;
-}
-.created_at,.id {
-	color:#999999;
-	font-size:<:FONT_SIZE - 2:>pt;
-}
-</style>
-</head>
-<body>
-<div class="overall">
-	<div class="pile">
-	<div class="menu">
-		<div class="img pile"><img src="<:$profile_image_url:>"></div>
-		<div class="inf">
-			<span id="name"><:$name:></span><br>
-			&nbsp;&nbsp;#<span id="id"><:$id:></span><br>
-			&nbsp;&nbsp;@<span id="screen_name"><:$screen_name:></span><br>
-		</div>
-		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "t" ? " act" : "":>"><a href="/<:$screen_name:>">ついっと</a></div>
-		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "m" ? " act" : "":>"><a href="/<:$screen_name:>/m">@<:$screen_name:></a></div>
-		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "r" ? " act" : "":>"><a href="/<:$screen_name:>/r">りついっと した</a></div>
-		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "e" ? " act" : "":>"><a href="/<:$screen_name:>/e">りついっと された</a></div>
-		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "q" ? " act" : "":>"><a href="/<:$screen_name:>/q">くおとついっと した</a></div>
-		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "u" ? " act" : "":>"><a href="/<:$screen_name:>/u">くおとついっと された</a></div>
-		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "f" ? " act" : "":>"><a href="/<:$screen_name:>/f"><span style="color: yellow;">&#9733;</span> した</a></div>
-		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "a" ? " act" : "":>"><a href="/<:$screen_name:>/a"><span style="color: yellow;">&#9733;</span> された</a></div>
-		<div class="tab<:$IS_SEARCH ? " act" : "":>"><a href="/<:$screen_name:>/s">けんさく</a></div>
-		<div class="tab<:!$IS_SEARCH && $MATCH[3] == "j" ? " act" : "":>"><a href="/<:$screen_name:>/j">きゅー</a></div>
-		<table class="calendar">
-			<tr>
-				<th><a href="/<:$screen_name:>/<:$MATCH[3]:>/<:$BORROW.cal.m != 1 ? $BORROW.cal.y : $BORROW.cal.y - 1:>-<:$BORROW.cal.m != 1 ? $BORROW.cal.m - 1 : 12:>">&lt;</a></th>
-				<th colspan="5"><:$BORROW.cal.y:>-<:$BORROW.cal.m:></th>
-				<th><a href="/<:$screen_name:>/<:$MATCH[3]:>/<:$BORROW.cal.m != 12 ? $BORROW.cal.y : $BORROW.cal.y + 1:>-<:$BORROW.cal.m != 12 ? $BORROW.cal.m + 1 : 1:>">&gt;</a></th>
-			</tr>
-			<tr>
-				<th>日</th>
-				<th>月</th>
-				<th>火</th>
-				<th>水</th>
-				<th>木</th>
-				<th>金</th>
-				<th>土</th>
-			</tr>
-:for calendar($BORROW.cal.m,$BORROW.cal.y) -> $i {
-			<tr>
-:for $i -> $i {
-				<td><a href="/<:$screen_name:>/<:$MATCH[3]:>/<:$BORROW.cal.y:>-<:$BORROW.cal.m:>-<:$i:>"><:$i:></a></td>
-:}
-			</tr>
-:}
-		</table>
-		<div class="">
-			<ul>
-:for $archives -> $e {
-				<li><a href="/<:$screen_name:>/t/<:$e.created_at_ym:>"><:$e.created_at_ym:></a> (<:$e.i:>)</li>
-:}
-			</ul>
-		</div>
-	</div>
-	<div class="">
-		<img src="/img/a.png">
-	</div>
-	</div>
-	<div class="main pile">
-:if $MATCH[3] == "z" {
-:}elsif $MATCH[3] == "j" {
-		<table>
-			<tr>
-				<th></th>
-				<th>実行予定時</th>
-				<th>実行時</th>
-				<th>内容</th>
-				<th>優先度</th>
-				<th>状態</th>
-			</tr>
-:for $queue -> $queue {
-			<tr>
-				<td><:$queue.id:></td>
-				<td><:$queue.atime:></td>
-				<td><:$queue.mtime:></td>
-				<td><:$queue.order:></td>
-				<td><:$queue.priority:></td>
-				<td><:$queue.flag:></td>
-			</tr>
-:}
-		</table>
-:}else{
-		<div class="search">
-			<form method="GET" action="/<:$screen_name:>/s">
-				<input type="hidden" name="c" value="<:$MATCH[3]:>">
-				けんさく&nbsp;<input type="text" size="40" name="grep" value="<:$GET.grep:>">
-				普通<input type="radio" name="re" value="0"<:$GET.re ? "" : " checked":>>
-				正規表現<input type="radio" name="re" value="1"<:$GET.re ? "checked" : "":>>
-				<input type="submit" name="" value="発動">
-:if $IS_SEARCH {
-				<br>
-		<table>
-			<tr>
-				<td>ついっと</td>
-				<td><input type="checkbox" name="c" value="t"<:match($MATCH[3],"t") ? " checked" : "":>></td>
-				<td>@<:$screen_name:></td>
-				<td><input type="checkbox" name="c" value="m"<:match($MATCH[3],"m") ? " checked" : "":>></td>
-				<td></td>
-				<td>ひづけ</td>
-				<td>
-					<select name="y-">
-						<option value="">*</option>
-:for [2006..$BORROW.y] -> $i {
-						<option value="<:$i:>"<:$MATCH[4] == $i ? " selected" : "":>><:$i:></option>
-:}
-					</select>
-					-
-					<select name="m-">
-						<option value="">*</option>
-:for [1..12] -> $i {
-						<option value="<:$i:>"<:$MATCH[5] == $i ? " selected" : "":>><:$i:></option>
-:}
-					</select>
-					-
-					<select name="d-">
-						<option value="">*</option>
-:for [1..31] -> $i {
-						<option value="<:$i:>"<:$MATCH[6] == $i ? " selected" : "":>><:$i:></option>
-:}
-					</select>
-				</td>
-				<td>から</td>
-			</tr>
-			<tr>
-				<td>りついっと した</td>
-				<td><input type="checkbox" name="c" value="r"<:match($MATCH[3],"r") ? " checked" : "":>></td>
-				<td>りついっと された</td>
-				<td><input type="checkbox" name="c" value="e"<:match($MATCH[3],"e") ? " checked" : "":>></td>
-				<td></td>
-				<td></td>
-				<td>
-					<select name="-y">
-						<option value="">*</option>
-:for [2006..$BORROW.y] -> $i {
-						<option value="<:$i:>"<:$MATCH[8] == $i ? " selected" : "":>><:$i:></option>
-:}
-					</select>
-					-
-					<select name="-m">
-						<option value="">*</option>
-:for [1..12] -> $i {
-						<option value="<:$i:>"<:$MATCH[9] == $i ? " selected" : "":>><:$i:></option>
-:}
-					</select>
-					-
-					<select name="-d">
-						<option value="">*</option>
-:for [1..31] -> $i {
-						<option value="<:$i:>"<:$MATCH[10] == $i ? " selected" : "":>><:$i:></option>
-:}
-					</select>
-				</td>
-				<td>まで</td>
-			</tr>
-			<tr>
-				<td>くおとついっと した</td>
-				<td><input type="checkbox" name="c" value="q"<:match($MATCH[3],"q") ? " checked" : "":>></td>
-				<td>くおとついっと した</td>
-				<td><input type="checkbox" name="c" value="u"<:match($MATCH[3],"u") ? " checked" : "":>></td>
-			</tr>
-			<tr>
-				<td><span style="color: yellow;">&#9733;</span> した</td>
-				<td><input type="checkbox" name="c" value="f"<:match($MATCH[3],"f") ? " checked" : "":>></td>
-				<td><span style="color: yellow;">&#9733;</span> された</td>
-				<td><input type="checkbox" name="c" value="a"<:match($MATCH[3],"a") ? " checked" : "":>></td>
-			</tr>
-		</table>
-:}
-			</form>
-		</div>
-		<div class=""><:$rows:> 件
-		</div>
-:for $status -> $status {
-		<div class="">
-			<div class="timeline_name">
-				<a href="https://twitter.com/#!/<:$status.user.screen_name:>" target="_blank"><span class="screen_name"><:$status.user.screen_name:></span></a>
-				<span class="name"><:$status.user.name:></span>
-				<span class="created_at"><:$status.created_at_formatted:></span>
-				<a href="https://twitter.com/#!/<:$status.user.screen_name:>/status/<:$status.id:>" target="_blank"><span class="id">#<:$status.id:></span></a>
-			</div>
-			<div class="timeline_text"><:$status.text|mark_raw:></div>
-		</div>
-:}
-:}
-		<table>
-			<tr>
-:for [1..($rows / 48) + 1] -> $i {
-:if $i != 1 && $i % 20 == 1 {
-			</tr>
-			<tr>
-:}
-				<td class="page"><a href="<:$BORROW.location:>/<:$i:>?<:$ENV.QUERY_STRING:>"><:$i:></a></td>
-:}
-			</tr>
-		</table>
-	</div>
-</div>
-</body>
-</html>
-EOF
+	return($issue ? $issue : "Text::Xslate",$r // {},file =>"core.Xslate");
 }
