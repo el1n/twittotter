@@ -68,25 +68,6 @@ STATIC_STATUS_EXPIRE=7200
 STATUS_EXPIRE=1800
 QUEUE_EXPIRE=0
 
-[Twitter]
-CONSUMER_KEY=6LRZYrSsqXyhArpkI4Bw
-CONSUMER_SECRET=UK2h78WjOxId8ICchBzoLIh0cgPghFb4wrorSm3k
-ACCESS_TOKEN=132426553-czlqqmICDOEfKEjpdMfsjcqOFxMnQsbjsxUoCctR
-ACCESS_TOKEN_SECRET=4RhnKsWqqlYV1U0vOWzjg2Se0CFpbLMKt8NCWnMtik
-
-[API]
-FLICKR_KEY=d03012aa9ef1efbf7d2cfc927cbb4a35
-FLICKR_SECRET=bd07b803046ba065
-
-LOGGEDIN_HOME_TIMELINE_COUNT=200
-LOGGEDIN_MENTIONS_COUNT=200
-LOGGEDIN_FAVORITES_COUNT=200
-LOGGEDIN_RETWEETED_BY_COUNT=200
-DEFAULT_HOME_TIMELINE_COUNT=40
-DEFAULT_MENTIONS_COUNT=0
-DEFAULT_FAVORITES_COUNT=40
-DEFAULT_RETWEETED_BY_COUNT=40
-
 [MySQL]
 HOST=localhost
 PORT=3306
@@ -171,6 +152,7 @@ SALVAGE.RETWEETED=過去のリツイート取得 (200件)
 SALVAGE.FAVORITE=過去のお気に入り取得 (200件)
 
 EOF
+	@{$C}{qw(Twitter API)} = @{Config::Tiny->read("core.conf")}{qw(Twitter API)};
 	$B = {
 		DBI =>DBI->connect(sprintf("dbi:mysql:database=%s;host=%s;port=%d",@{$C->{MySQL}}{qw(DATABASE HOST PORT)}),@{$C->{MySQL}}{qw(USERNAME PASSWORD)}),
 		Cache::Memcached =>Cache::Memcached::libmemcached->new({servers =>[split(/ /o,$C->{Memcached}->{HOST})]}),
@@ -568,7 +550,7 @@ sub salvage
 	my $g = shift();
 	my($screen_name) = @{$q};
 	my($location,$screen_name,$issue) = @{$m};
-	my($user_id,$flag,$axis) = @{$g}{qw(user_id flag axis)};
+	my($user_id,$flag,$axis) = @{$d}{qw(user_id flag axis)};
 	$user_id //= user_id($screen_name);
 	$flag = $flag | F_SYNCHRONIZED;
 
@@ -576,30 +558,36 @@ sub salvage
 	given($flag & F_API_MASK){
 		when(F_TWEETS){
 			if(!($r = $B->{Net::Twitter}->user_timeline({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
+				warn("Net::Twitter->user_timeline returned null.");
 				return(-1);
 			}
 		}
 		when(F_REPLIES){
 			if(!($r = $B->{Net::Twitter}->mentions({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
+				warn("Net::Twitter->mentions returned null.");
 				return(-1);
 			}
 		}
 		when(F_RETWEETED){
 			if(!($r = $B->{Net::Twitter}->retweets_of_me({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,include_entities =>1}))){
+				warn("Net::Twitter->retweets_of_me returned null.");
 				return(-1);
 			}
 		}
 		when(F_FAVORITES){
 			if(!($r = $B->{Net::Twitter}->favorites({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
+				warn("Net::Twitter->favorites returned null.");
 				return(-1);
 			}
 		}
 		when(F_TIMELINE){
 			if(!($r = $B->{Net::Twitter}->friends_timeline({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
+				warn("Net::Twitter->friends_timeline returned null.");
 				return(-1);
 			}
 		}
 		default{
+			warn("Unknown flag.");
 			return(-1);
 		}
 	}
@@ -791,9 +779,11 @@ sub salvage
 		#	return(-1);
 		#}
 		if(!&r3_processer($structure,$flag)){
+			warn("r3_processer error.");
 			return(-1);
 		}
 		if(!&r4_processer($structure,$flag)){
+			warn("r4_processer error.");
 			return(-1);
 		}
 
@@ -816,6 +806,7 @@ sub salvage
 				$flag,
 				$flag,
 			) == 0){
+				warn(sprintf("MySQL DBT_SALVAGE_11 error."));
 				return(-1);
 			}
 		}else{
@@ -829,6 +820,7 @@ sub salvage
 				$flag,
 				$flag,
 			) == 0){
+				warn(sprintf("MySQL DBT_SALVAGE_6 error."));
 				return(-1);
 			}
 		}
@@ -842,7 +834,7 @@ sub r1_processer
 	my $structure = shift();
 	my $flag = shift();
 
-	return();
+	return(1);
 }
 
 sub r2_processer
