@@ -1,0 +1,432 @@
+:constant SCREEN = 800
+:constant MENU_WIDTH = 160
+:constant TAB_WIDTH = 136
+:constant FONT_SIZE = 10
+:constant MEDIA_WIDTH = 128
+:constant MEDIA_HEIGHT = 78
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html>
+<head>
+<title>ついっとったー - <:!$BORROW.IS_SHOW ? "ツイートを保存して検索できるようになるだけ" : "@" ~ $screen_name:></title>
+<link rel="shortcut icon" href="/favicon.ico" />
+<style type="text/css">
+body {
+	color:#<:$profile_text_color:>;
+	background-color:#<:$profile_background_color:>;
+	font-family:'Verdana';
+	font-style:normal;
+	font-weight:normal;
+	font-size:<:FONT_SIZE:>pt;
+}
+a:link,a:visited {
+	color:#<:$profile_link_color:>;
+	text-decoration:none;
+}
+a:hover,a:active {
+	color:#<:$profile_link_color:>;
+	text-decoration:underline;
+}
+
+.pile {
+:#	float:left;
+	float:right;
+}
+.base {
+	margin:8px auto 0px auto;
+:#	padding:0px 0px 0px 0px;
+	width:<:SCREEN:>px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#ffffff;
+}
+.menu {
+	margin:0px -1px 0px 0px;
+	padding:0px 0px 8px 0px;
+	width:<:MENU_WIDTH:>px;
+:#	border:solid 1px #<:$profile_sidebar_border_color:>;
+:#	border-top:solid 1px #<:$profile_sidebar_border_color:>;
+	border-right:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+	border-left:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#<:$profile_sidebar_fill_color:>;
+}
+.menu .info {
+:#	margin:0px 0px 0px 0px;
+	padding:4px 4px 24px 4px;
+}
+.menu .info img {
+	margin:4px 4px 4px 4px;
+:#	padding:0px 0px 0px 0px;
+	width:48px;
+	height:48px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+}
+.menu .active {
+	margin:0px <:MENU_WIDTH - TAB_WIDTH:>px -1px -1px;
+	padding:4px 0px 4px 12px;
+:#	border:solid 1px #<:$profile_sidebar_border_color:>;
+	border-top:solid 1px #<:$profile_sidebar_border_color:>;
+	border-right:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+	border-left:solid 1px #ffffff;
+	background-color:#ffffff;
+}
+.menu .inactive {
+	margin:0px <:MENU_WIDTH - TAB_WIDTH:>px -1px -1px;
+	padding:4px 0px 4px 12px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#<:$profile_sidebar_fill_color:>;
+}
+.menu .conf {
+	margin:8px 8px 8px 8px;
+	padding:2px 2px 2px 2px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#ffffff;
+	font-size:<:FONT_SIZE - 1:>pt;
+}
+.menu .calendar {
+	margin:8px auto 8px auto;
+:#	padding:0px 0px 0px 0px;
+}
+.menu .calendar th {
+:#	border:solid 1px #<:$profile_sidebar_border_color:>;
+:#	border-top:solid 1px #<:$profile_sidebar_border_color:>;
+	border-right:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+:#	border-left:solid 1px #ffffff;
+	background-color:#<:$profile_sidebar_fill_color:>;
+	text-align:center;
+}
+.menu .calendar td {
+:#	border:solid 1px #<:$profile_sidebar_border_color:>;
+:#	border-top:solid 1px #<:$profile_sidebar_border_color:>;
+	border-right:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+:#	border-left:solid 1px #ffffff;
+	background-color:#ffffff;
+	text-align:center;
+}
+.main {
+	margin:0px 0px 0px 0px;
+	padding:0px 0px 8px 0px;
+	width:<:SCREEN - MENU_WIDTH - 2:>px;
+	background-color:#ffffff;
+}
+.main .queue {
+	margin:8px auto 8px auto;
+:#	padding:0px 0px 0px 0px;
+}
+.main .queue th {
+:#	border:solid 1px #<:$profile_sidebar_border_color:>;
+:#	border-top:solid 1px #<:$profile_sidebar_border_color:>;
+	border-right:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+:#	border-left:solid 1px #ffffff;
+	background-color:#<:$profile_sidebar_fill_color:>;
+	text-align:center;
+}
+.main .queue td {
+:#	border:solid 1px #<:$profile_sidebar_border_color:>;
+:#	border-top:solid 1px #<:$profile_sidebar_border_color:>;
+	border-right:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+:#	border-left:solid 1px #ffffff;
+	background-color:#ffffff;
+	text-align:center;
+}
+.main .search {
+	margin:8px 8px 8px 8px;
+	padding:8px 8px 8px 8px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#<:$profile_sidebar_fill_color:>;
+}
+.main .search table {
+	margin:8px auto 0px 0px;
+:#	padding:0px 0px 0px 0px;
+}
+.main .search td {
+	text-align:right;
+}
+.main .timeline .timeline_head {
+	margin:2px 8px 2px 8px;
+:#	padding:0px 0px 0px 0px;
+}
+.main .timeline .timeline_head .screen_name {
+	color:#333333;
+	font-weight:bold;
+}
+.main .timeline .timeline_head .name {
+	color:#666666;
+}
+.main .timeline .timeline_head .id {
+	color:#999999;
+	font-size:<:FONT_SIZE - 2:>pt;
+}
+.main .timeline .timeline_head .created_at {
+	color:#999999;
+	font-size:<:FONT_SIZE - 2:>pt;
+}
+.main .timeline .timeline_body {
+	margin:0px 24px 0px 8px;
+	padding:0px 0px 2px 4px;
+:#	border:solid 1px #<:$profile_sidebar_border_color:>;
+:#	border-top:solid 1px #<:$profile_sidebar_border_color:>;
+:#	border-right:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+:#	border-left:solid 1px #ffffff;
+}
+.main .timeline .withmedia {
+	margin:0px 24px 0px 8px;
+	padding:0px 0px 2px 4px;
+	min-height:<:MEDIA_HEIGHT - 8:>px;
+}
+.main .timeline img {
+	margin:4px 24px 2px 2px;
+:#	padding:0px 0px 0px 0px;
+	width:<:MEDIA_WIDTH:>px;
+	height:<:MEDIA_HEIGHT:>px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+}
+.main .index {
+	margin:8px auto 8px auto;
+:#	padding:0px 0px 0px 0px;
+}
+.main .index td {
+	width:20px;
+	height:20px;
+:#	border:solid 1px #<:$profile_sidebar_border_color:>;
+:#	border-top:solid 1px #<:$profile_sidebar_border_color:>;
+	border-right:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+:#	border-left:solid 1px #ffffff;
+	font-size:<:FONT_SIZE - 1:>pt;
+	text-align:center;
+}
+.main .index .active {
+	background-color:#<:$profile_sidebar_fill_color:>;
+}
+</style>
+</head>
+<body>
+<div class="base">
+	<div class="pile">
+		<div class="menu">
+			<div class="info">
+				<img class="pile" src="<:$profile_image_url_https:>" alt="<:$profile_image_url_https:>" />
+				<span class=""><:$name:></span><br />
+				&nbsp;&nbsp;<span class="">@<:$screen_name:></span><br />
+				&nbsp;&nbsp;<span class="">#<:$id:></span><br />
+			</div>
+			:if !$BORROW.IS_SHOW {
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "t" ? "active" : "inactive":>"><a href="/">ついっとったー</a></div>
+			:}else{
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "t" ? "active" : "inactive":>"><a href="/<:$screen_name:>/t">ついっと</a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "m" ? "active" : "inactive":>"><a href="/<:$screen_name:>/m">@<:$screen_name:></a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "r" ? "active" : "inactive":>"><a href="/<:$screen_name:>/r">りついっと した</a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "e" ? "active" : "inactive":>"><a href="/<:$screen_name:>/e">りついっと された</a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "q" ? "active" : "inactive":>"><a href="/<:$screen_name:>/q">くおとついっと した</a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "u" ? "active" : "inactive":>"><a href="/<:$screen_name:>/u">くおとついっと された</a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "f" ? "active" : "inactive":>"><a href="/<:$screen_name:>/f"><span style="color:yellow;">&#9733;</span>　した</a></div>
+			<div class="<:$BORROW.IS_SEARCH ? "active" : "inactive":>"><a href="/<:$screen_name:>/s">けんさく</a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "i" ? "active" : "inactive":>"><a href="/<:$screen_name:>/i">じょうほう</a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "j" ? "active" : "inactive":>"><a href="/<:$screen_name:>/j">きゅー</a></div>
+			<div class="conf">
+				表示設定
+				<div class="">
+					<span style="color:<:$SES.v ? "green" : "red":>;">&#9632;</span>
+					<span class=""><a href="/<:$screen_name:>/c?v=1">画像表示</a></span>
+				</div>
+			</div>
+			<table class="calendar">
+				<tr>
+					<th><a href="/<:$screen_name:>/<:$MATCH[3]:>/<:$BORROW.cal.m != 1 ? $BORROW.cal.y : $BORROW.cal.y - 1:>-<:$BORROW.cal.m != 1 ? $BORROW.cal.m - 1 : 12:>">&lt;</a></th>
+					<th colspan="5"><:$BORROW.cal.y:>-<:$BORROW.cal.m:></th>
+					<th><a href="/<:$screen_name:>/<:$MATCH[3]:>/<:$BORROW.cal.m != 12 ? $BORROW.cal.y : $BORROW.cal.y + 1:>-<:$BORROW.cal.m != 12 ? $BORROW.cal.m + 1 : 1:>">&gt;</a></th>
+				</tr>
+				<tr>
+					<th>日</th>
+					<th>月</th>
+					<th>火</th>
+					<th>水</th>
+					<th>木</th>
+					<th>金</th>
+					<th>土</th>
+				</tr>
+				:for calendar($BORROW.cal.m,$BORROW.cal.y) -> $i {
+				<tr>
+					:for $i -> $i {
+					<td><a href="/<:$screen_name:>/<:$MATCH[3]:>/<:$BORROW.cal.y:>-<:$BORROW.cal.m:>-<:$i:>"><:$i:></a></td>
+					:}
+				</tr>
+				:}
+			</table>
+			<div class="">
+				<ul>
+					:for $archives -> $e {
+					<li><a href="/<:$screen_name:>/t/<:$e.created_at_ym:>"><:$e.created_at_ym:></a> (<:$e.i:>)</li>
+					:}
+				</ul>
+			</div>
+			:}
+		</div>
+		<div class="">
+		</div>
+	</div>
+	<div class="pile main">
+		:if !$BORROW.IS_SEARCH && $MATCH[3] == "j" {
+			<table class="queue">
+				<tr>
+					<th></th>
+					<th>実行予定</th>
+					<th>実行終了</th>
+					<th>内容</th>
+					<th>優先度</th>
+					<th>状態</th>
+				</tr>
+				:for $queue -> $queue {
+				<tr>
+					<td><:$queue.id:></td>
+					<td><:$queue.atime:></td>
+					<td><:$queue.mtime:></td>
+					<td><:$queue.order:></td>
+					<td><:$queue.priority:></td>
+					<td><:$queue.flag:></td>
+				</tr>
+				:}
+			</table>
+		:}elsif !$BORROW.IS_SEARCH && $MATCH[3] == "j" {
+		:}else{
+		:if !$BORROW.IS_SHOW {
+		<div class="search">
+			<span class=""><a href="/?op=login">ろぐいん/とうろく</a> (Twitterのアカウントが必要です。)</span><br />
+			<span class=""><a href="/?op=logout">ろぐあうと</a> (Twitterのアカウントは必要ありません。)</span><br />
+		</div>
+		:}else{
+		<div class="search">
+			<form class="" method="GET" action="/<:$screen_name:>/s">
+				<input type="hidden" name="c" value="<:$MATCH[3]:>" />
+				けんさく<input type="text" size="40" name="grep" value="<:$GET.grep:>" />
+				&nbsp;普通<input type="radio" name="e" value="0"<:$GET.e ? "" : " checked=\"checked\"":> />
+				&nbsp;正規表現<input type="radio" name="e" value="1"<:$GET.e ? " checked=\"checked\"" : "":> />
+				&nbsp;<input type="submit" name="" value="発動" />
+				:if $BORROW.IS_SEARCH {
+				<table class="">
+					<tr>
+						<td>ついっと</td>
+						<td><input type="checkbox" name="c" value="t"<:match($MATCH[3],"t") ? " checked=\"checked\"" : "":> /></td>
+						<td>@<:$screen_name:></td>
+						<td><input type="checkbox" name="c" value="m"<:match($MATCH[3],"m") ? " checked=\"checked\"" : "":> /></td>
+						<td>&nbsp;&nbsp;</td>
+						<td>ひづけ</td>
+						<td>
+							<select name="y-">
+								<option value="">*</option>
+								:for [2006..$BORROW.y] -> $i {
+								<option value=""<:$MATCH[4] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								:}
+							</select>
+							-
+							<select name="m-">
+								<option value="">*</option>
+								:for [1..12] -> $i {
+								<option value=""<:$MATCH[5] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								:}
+							</select>
+							-
+							<select name="d-">
+								<option value="">*</option>
+								:for [1..31] -> $i {
+								<option value=""<:$MATCH[6] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								:}
+							</select>
+						</td>
+						<td>まで</td>
+					</tr>
+					<tr>
+						<td>りついっと した</td>
+						<td><input type="checkbox" name="c" value="r"<:match($MATCH[3],"r") ? " checked=\"checked\"" : "":> /></td>
+						<td>りついっと された</td>
+						<td><input type="checkbox" name="c" value="e"<:match($MATCH[3],"e") ? " checked=\"checked\"" : "":> /></td>
+						<td></td>
+						<td></td>
+						<td>
+							<select name="-y">
+								<option value="">*</option>
+								:for [2006..$BORROW.y] -> $i {
+								<option value=""<:$MATCH[8] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								:}
+							</select>
+							-
+							<select name="-m">
+								<option value="">*</option>
+								:for [1..12] -> $i {
+								<option value=""<:$MATCH[9] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								:}
+							</select>
+							-
+							<select name="-d">
+								<option value="">*</option>
+								:for [1..31] -> $i {
+								<option value=""<:$MATCH[10] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								:}
+							</select>
+						</td>
+					</tr>
+					<tr>
+						<td>くおとついっと した</td>
+						<td><input type="checkbox" name="c" value="q"<:match($MATCH[3],"q") ? " checked=\"checked\"" : "":> /></td>
+						<td>くおとついっと された</td>
+						<td><input type="checkbox" name="c" value="u"<:match($MATCH[3],"u") ? " checked=\"checked\"" : "":> /></td>
+					</tr>
+					<tr>
+						<td><span style="color:yellow;">&#9733;</span> した</td>
+						<td><input type="checkbox" name="c" value="f"<:match($MATCH[3],"f") ? " checked=\"checked\"" : "":> /></td>
+						<td><span style="color:yellow;">&#9733;</span> された</td>
+						<td><input type="checkbox" name="c" value="a"<:match($MATCH[3],"a") ? " checked=\"checked\"" : "":> /></td>
+					</tr>
+					<tr>
+						<td>ああああ</td>
+						<td><input type="checkbox" name="i" value="q"<:match($MATCH[3],"i") ? " checked=\"checked\"" : "":> /></td>
+					</tr>
+				</table>
+				:}
+			</form>
+		</div>
+		<div class="">
+				<span class="rows"><:$rows:> 件</span>
+		</div>
+			:}
+		<div class="timeline">
+				:for $status -> $status {
+				:if $SES.v {
+				:for $status.entities.media -> $media {
+				<a href="<:$media.media_url:>"><img class="pile" src="<:$media.thumb_url:>" alt="<:$media.media_url:>"></a>
+				:}
+				:}
+				<div class="timeline_head">
+					<a href="https://twitter.com/#!/<:$status.user.screen_name:>" target="_blank"><span class="screen_name"><:$status.user.screen_name:></span></a>
+					<span class="name"><:$status.user.name:></span>
+					<span class="created_at"><:$status.created_at_formatted:></span>
+					<a href="https://twitter.com/#!/<:$status.user.screen_name:>/status/<:$status.id:>" target="_blank"><span class="id">#<:$status.id:></span></a>
+				</div>
+				<div class="timeline_body<:$SES.v && $status.entities.media.size() > 0 ? " withmedia" : "":>">
+					<span class="text"><:$status.text|raw:></span>
+				</div>
+				:}
+		</div>
+		<table class="index">
+			<tr>
+			:for [1..($rows / 48) + 1] -> $i {
+			:if $i != 1 && $i % 20 == 1 {
+			</tr>
+			<tr>
+			:}
+				<td class="<:$i - 1 == $MATCH[11] ? "active" : "":>"><a href="<:$BORROW.location:>/<:$i:>?<:$ENV.QUERY_STRING:>"><:$i:></a></td>
+			:}
+			</tr>
+		</table>
+		:}
+	</div>
+	&nbsp;
+</div>
+</body>
+</html>

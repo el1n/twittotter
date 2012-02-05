@@ -4,6 +4,7 @@ use utf8;
 use lib qw(/usr/local/lib/perl);
 use vars qw($B $C);
 use List::Util qw(first max maxstr min minstr reduce shuffle sum);
+use Clone;
 use Encode qw(encode decode);
 use Compress::Zlib;
 use Storable qw(thaw nfreeze);
@@ -40,6 +41,7 @@ use constant F_QUOTETWEETED =>1 << 15;
 use constant F_FAVORITED =>1 << 16;
 use constant F_SYNCHRONIZED =>1 << 17;
 use constant F_TIMELINE =>1 << 18;
+use constant F_HASH =>1 << 19;
 use constant F_API_MASK =>F_TWEETS|F_REPLIES|F_FAVORITES|F_RETWEETED|F_TIMELINE;
 use constant F_TYPE_MASK =>F_API_MASK|F_RETWEETS|F_QUOTETWEETS|F_REPLYTO|F_QUOTETWEETED|F_FAVORITED;
 use constant I_PRIORITY_LOW =>1;
@@ -52,14 +54,15 @@ BEGIN
 TIMEZONE=Asia/Tokyo
 LOCALE=ja_JP
 
+HTML=/var/www/twittotter/html
+TEMPLATE=/var/www/twittotter/html
 CACHE_DIR=/tmp
 CACHE_PREFIX=twittotter
-TEMPLATE=/var/www/twittotter/html
 
 LIMIT=48
 
 [Cache]
-DEFAULT_EXPIRE=3600
+DEFAULT_EXPIRE=1
 PROFILE_EXPIRE=7200
 STATIC_STATUS_EXPIRE=7200
 STATUS_EXPIRE=1800
@@ -70,6 +73,10 @@ CONSUMER_KEY=6LRZYrSsqXyhArpkI4Bw
 CONSUMER_SECRET=UK2h78WjOxId8ICchBzoLIh0cgPghFb4wrorSm3k
 ACCESS_TOKEN=132426553-czlqqmICDOEfKEjpdMfsjcqOFxMnQsbjsxUoCctR
 ACCESS_TOKEN_SECRET=4RhnKsWqqlYV1U0vOWzjg2Se0CFpbLMKt8NCWnMtik
+
+[API]
+FLICKR_KEY=d03012aa9ef1efbf7d2cfc927cbb4a35
+FLICKR_SECRET=bd07b803046ba065
 
 LOGGEDIN_HOME_TIMELINE_COUNT=200
 LOGGEDIN_MENTIONS_COUNT=200
@@ -96,10 +103,20 @@ METHOD_4=SELECT `screen_name` FROM `Queue` WHERE `user_id` = ? LIMIT 0,1
 METHOD_5=SELECT `screen_name` FROM `Tweet` WHERE `user_id` = ? LIMIT 0,1
 CLI_QC_0=TRUNCATE TABLE `Queue`
 CLI_QI_0=SELECT * FROM `Queue` WHERE `user_id` = ? AND `order` LIKE ? AND `flag` & ? = ? LIMIT 0,1
-CLI_QI_1=
 CLI_QI_2=INSERT `Queue` (`user_id`,`screen_name`,`order`,`priority`,`atime`,`flag`) VALUES(?,?,?,?,DATE_ADD(CURRENT_TIMESTAMP,INTERVAL ? SECOND),?)
 CLI_QE_0=SELECT * FROM `Queue` LEFT JOIN `Token` ON `Queue`.`user_id` = `Token`.`user_id` WHERE `atime` <= CURRENT_TIMESTAMP AND `flag` & 1 ORDER BY `Queue`.`priority` DESC,`Queue`.`ctime` ASC LIMIT 0,1
 CLI_QE_1=UPDATE `Queue` SET `flag` = ?,`mtime` = CURRENT_TIMESTAMP WHERE `id` = ?
+CLI_QE_2=UPDATE `Queue` SET `id` = LAST_INSERT_ID(`id`),`atime` = DATE_ADD(CURRENT_TIMESTAMP,INTERVAL 1 MINUTE) WHERE `atime` <= CURRENT_TIMESTAMP AND `flag` & 1 ORDER BY `priority` DESC,`ctime` ASC LIMIT 1
+CLI_QE_3=SELECT * FROM `Queue` LEFT JOIN `Token` ON `Queue`.`user_id` = `Token`.`user_id` WHERE `Queue`.`id` = LAST_INSERT_ID()
+CLI_R1_0=SELECT * FROM `Tweet` WHERE `revision` = 0 LIMIT 0,1
+CLI_R2_0=SELECT * FROM `Tweet` LEFT JOIN `Token` ON `Tweet`.`user_id` = `Token`.`user_id` WHERE `Tweet`.`revision` = 1 LIMIT 0,1
+CLI_R2_1=UPDATE `Tweet` SET `revision` = 2 WHERE `status_id` = ?
+CLI_R2_2=UPDATE `Tweet` SET `structure` = ?,`revision` = 2 WHERE `status_id` = ?
+CLI_R3_0=SELECT * FROM `Tweet` WHERE `revision` = 2 LIMIT 0,1
+CLI_R3_1=UPDATE `Tweet` SET `text` = ?,`structure` = ?,`revision` = 3 WHERE `status_id` = ?
+CLI_R4_0=SELECT * FROM `Tweet` WHERE `revision` = 3 ORDER BY `created_at` DESC LIMIT 0,1
+CLI_R4_1=UPDATE `Tweet` SET `text` = ?,`structure` = ?,`revision` = 4 WHERE `status_id` = ?
+
 SALVAGE_0=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,1
 SALVAGE_1=SELECT ?,`status_id` - 1 AS `status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` ASC LIMIT 0,1
 SALVAGE_2=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referred_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` DESC LIMIT 0,1
@@ -107,14 +124,15 @@ SALVAGE_3=SELECT ?,`Tweet`.`status_id` - 1 AS `status_id` FROM `Tweet` LEFT JOIN
 SALVAGE_4=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referring_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` DESC LIMIT 0,1
 SALVAGE_5=SELECT ?,`Tweet`.`status_id` - 1 AS `status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referring_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` ASC LIMIT 0,1
 SALVAGE_6=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_at`,`structure`,`flag`) VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `flag` = `flag` | ?
-SALVAGE_7=SELECT 1 FROM `Bind` WHERE `status_id` = ? AND (`referring_user_id` = ? OR `referring_screen_name` = ?) AND (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ?
-SALVAGE_8=INSERT `Bind` (`status_id`,`referring_user_id`,`referring_screen_name`,`referred_user_id`,`referred_screen_name`,`flag`) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `flag` = `flag` | ?
-SALVAGE_9=UPDATE `Bind` SET `flag` = ? WHERE `status_id` = ? AND (`referring_user_id` = ? OR `referring_screen_name` = ?) AND (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ?
+SALVAGE_7=SELECT 1 FROM `Bind` WHERE `status_id` = ? AND ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?) OR (? IS NOT NULL AND `referred_hash` = ?)) AND `flag` & ? = ? LIMIT 0,1
+SALVAGE_8=INSERT `Bind` (`status_id`,`referring_user_id`,`referring_screen_name`,`referred_user_id`,`referred_screen_name`,`referred_hash`,`flag`) VALUES(?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `flag` = `flag` | ?
+SALVAGE_9=UPDATE `Bind` SET `flag` = ? WHERE `status_id` = ? AND ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?) OR (? IS NOT NULL AND `referred_hash` = ?)) AND `flag` & ? = ?
 SALVAGE_10=SELECT * FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 SALVAGE_11=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_at`,`structure`,`flag`) VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `structure` = VALUES(`structure`),`flag` = `flag` | ?
 SALVAGE_12=SELECT `flag` FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 
 INDEX_0=INSERT `Token` (`user_id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE `ctime` = CURRENT_TIMESTAMP
+INDEX_1=SELECT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` RIGHT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `referred_hash` = ?
 SHOW_0=SELECT * FROM `Queue` WHERE `user_id` = ? OR `screen_name` = ? ORDER BY `ctime` DESC LIMIT 0,48
 SHOW_1=SELECT COUNT(*) FROM `Queue` WHERE `user_id` = ? OR `screen_name` = ? ORDER BY `ctime` DESC LIMIT 0,48
 SHOW_2=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referring_screen_name` ORDER BY `i` DESC LIMIT 0,8
@@ -156,7 +174,7 @@ EOF
 	$B = {
 		DBI =>DBI->connect(sprintf("dbi:mysql:database=%s;host=%s;port=%d",@{$C->{MySQL}}{qw(DATABASE HOST PORT)}),@{$C->{MySQL}}{qw(USERNAME PASSWORD)}),
 		Cache::Memcached =>Cache::Memcached::libmemcached->new({servers =>[split(/ /o,$C->{Memcached}->{HOST})]}),
-		BlackCurtain::Fragility =>BlackCurtain::Fragility->new(),
+		BlackCurtain::Fragility =>BlackCurtain::Fragility->new(requests_redirectable =>[]),
 	};
 	for(grep(/_[0-9]+$/ && !/_NP$/o,keys(%{$C->{MySQL}}))){
 		$B->{"DBT_".$_} = $B->{DBI}->prepare($C->{MySQL}->{$_});
@@ -204,6 +222,14 @@ sub gunzip
 	return(thaw(Compress::Zlib::memGunzip(shift())));
 }
 
+sub pack_structure
+{
+	my $g = shift() // $_;
+
+	$g->{structure} = gzip($g->{structure});
+	return($g);
+}
+
 sub unpack_structure
 {
 	my $g = shift() // $_;
@@ -211,7 +237,6 @@ sub unpack_structure
 	$g->{structure} = gunzip($g->{structure});
 	return($g);
 }
-
 
 sub encode_DateTime
 {
@@ -280,15 +305,16 @@ given(shift(@ARGV)){
 				#&new_queue($user_id,$screen_name,"SALVAGE.MENTION",I_PRIORITY_HIGH,0,F_REPLIES);
 				#&new_queue($user_id,$screen_name,"SALVAGE.RETWEETED",I_PRIORITY_HIGH,0,F_RETWEETED);
 				#&new_queue($user_id,$screen_name,"SALVAGE.FAVORITE",I_PRIORITY_HIGH,0,F_FAVORITES);
-				#&new_queue($user_id,$screen_name,"UPDATE.TIMELINE",I_PRIORITY_HIGH,0,F_TWEETS);
+				&new_queue($user_id,$screen_name,"UPDATE.TIMELINE",I_PRIORITY_HIGH,0,F_TWEETS);
 				#&new_queue($user_id,$screen_name,"UPDATE.MENTION",I_PRIORITY_HIGH,0,F_REPLIES);
 				#&new_queue($user_id,$screen_name,"UPDATE.FAVORITE",I_PRIORITY_HIGH,0,F_FAVORITES);
 				#&new_queue($user_id,$screen_name,"UPDATE.RETWEETED",I_PRIORITY_HIGH,0,F_RETWEETED);
-				&new_queue($user_id,$screen_name,"UPDATE.TIMELINE.ALL",I_PRIORITY_LOW,0,F_TIMELINE);
+				#&new_queue($user_id,$screen_name,"UPDATE.TIMELINE.ALL",I_PRIORITY_LOW,0,F_TIMELINE);
 				#&new_queue($user_id,$screen_name,"COMPARE.TIMELINE",I_PRIORITY_HIGH,0,F_TWEETS);
 				#&new_queue($user_id,$screen_name,"COMPARE.MENTION",I_PRIORITY_HIGH,0,F_REPLIES);
 				#&new_queue($user_id,$screen_name,"COMPARE.RETWEETED",I_PRIORITY_HIGH,0,F_RETWEETED);
 				#&new_queue($user_id,$screen_name,"COMPARE.FAVORITE",I_PRIORITY_HIGH,0,F_FAVORITES);
+				#&new_queue($user_id,$screen_name,"NULL.TEST",I_PRIORITY_HIGH,0,0);
 			}
 			return($user_id);
 		}
@@ -309,37 +335,43 @@ given(shift(@ARGV)){
 			return(1);
 		}
 
-		if($B->{DBT_CLI_QE_0}->execute() == 0){
+		if($B->{DBT_CLI_QE_2}->execute() == 0){
 			#return();
 			exit(0);
 		}
-		my $r = $B->{DBT_CLI_QE_0}->fetchrow_hashref();
+		if($B->{DBT_CLI_QE_3}->execute() == 0){
+			#return();
+			exit(0);
+		}
+		my $r = $B->{DBT_CLI_QE_3}->fetchrow_hashref();
 
-		&mod_queue($r->{id},($r->{flag} & ~F_STATE) | F_PROCESS);
+		#&mod_queue($r->{id},($r->{flag} & ~F_STATE) | F_PROCESS);
 
 		local %SES;
 		@SES{qw(user_id screen_name ACCESS_TOKEN ACCESS_TOKEN_SECRET)} = @{$r}{qw(user_id screen_name ACCESS_TOKEN ACCESS_TOKEN_SECRET)};
 
 		my $i = -1;
-		if(&cb_prepare(
-			[],
+		if(!&cb_prepare(
 			[],
 			[],
 			{regular =>1},
 		)){
+			die();
+		}
+		if($r->{order} =~ /^(NULL)/io){
+		}elsif($r->{order} =~ /^(UPDATE|SALVAGE|COMPARE)/io){
 			$i = &salvage(
 				[$r->{screen_name}],
 				[undef,$r->{screen_name}],
-				[],
 				{
 					user_id =>$r->{user_id},
 					flag =>$r->{flag} & F_API_MASK,
-					axis =>{UPDATE =>1,SALVAGE =>-1,COMPARE =>-1}->{($r->{order} =~m/^(\w+)/o)[0]},
+					axis =>{UPDATE =>1,SALVAGE =>-1,COMPARE =>-1}->{$1},
 				},
 			);
 		}
 
-		if($r->{order} =~ /^(?:UPDATE)/io){
+		if($r->{order} =~ /^(UPDATE)/io){
 			$r->{priority} = I_PRIORITY_LOW;
 			$r->{atime} = 1200;
 			&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
@@ -353,7 +385,7 @@ given(shift(@ARGV)){
 			&mod_queue($r->{id},($r->{flag} & ~F_STATE) | F_FINISH);
 		}
 
-		printf("[Queue%d] Salvaged %d tweets.\n",$r->{id},$i);
+		printf("[Queue#%d %s] %s's queue, returned %d.\n",@{$r}{qw(id order screen_name)},$i);
 	}
 	when("-sd"){
 		if($B->{DBT_CLI_SD_0}->execute(shift(@ARGV)) == 0){
@@ -367,6 +399,67 @@ given(shift(@ARGV)){
 			if($B->{SALVAGE_10}->execute($structure) == 0){
 				print $structure."\n";
 			}
+		}
+	}
+	when("-u2"){
+		while($B->{DBT_CLI_R2_0}->execute() != 0){
+			my $r = unpack_structure($B->{DBT_CLI_R2_0}->fetchrow_hashref());
+			if(($r->{flag} & F_RETWEETED) && $#{$r->{twitter}->{structure}->{retweeted_by}} == -1){
+				local %SES;
+				@SES{qw(user_id screen_name ACCESS_TOKEN ACCESS_TOKEN_SECRET)} = @{$r}{qw(user_id screen_name ACCESS_TOKEN ACCESS_TOKEN_SECRET)};
+				if(!&cb_prepare(
+					[],
+					[],
+					{regular =>1},
+				)){
+					die();
+				}
+
+				if(!&r2_processer(@{$r}{qw(structure flag)})){
+					die(join(":",$r->{status_id},$@));
+				}
+				pack_structure($r);
+				if($B->{DBT_CLI_R2_2}->execute(@{$r}{qw(structure status_id)}) == 0){
+					die;
+				}
+				printf("Converted %d, revision %d to 2, \$#retweeted_by = %d\n",@{$r}{qw(status_id revision)},$#{$r->{twitter}->{structure}->{retweeted_by}});
+			}else{
+				if($B->{DBT_CLI_R2_1}->execute(@{$r}{qw(status_id)}) == 0){
+					die;
+				}
+				printf("Converted %d, revision %d to 2.\n",@{$r}{qw(status_id revision)});
+			}
+		}
+	}
+	when("-u3"){
+		while($B->{DBT_CLI_R3_0}->execute() != 0){
+			my $r = unpack_structure($B->{DBT_CLI_R3_0}->fetchrow_hashref());
+
+			if(!&r3_processer(@{$r}{qw(structure flag)})){
+				die($r->{status_id});
+			}
+			pack_structure($r);
+			if($B->{DBT_CLI_R3_1}->execute(@{$r}{qw(text structure status_id)}) == 0){
+				die($r->{status_id});
+			}
+			printf("Converted %d, revision %d to 3.\n",@{$r}{qw(status_id revision)});
+		}
+	}
+	when("-u4"){
+		while($B->{DBT_CLI_R4_0}->execute() != 0){
+			my $r = unpack_structure($B->{DBT_CLI_R4_0}->fetchrow_hashref());
+
+			if(!&r3_processer(@{$r}{qw(structure flag)})){
+				die($r->{status_id});
+			}
+			if(!&r4_processer(@{$r}{qw(structure flag)})){
+				die($r->{status_id});
+			}
+			pack_structure($r);
+			if($B->{DBT_CLI_R4_1}->execute(@{$r}{qw(text structure status_id)}) == 0){
+				die($r->{status_id});
+			}
+			printf("Converted %d, revision %d to 4.\n",@{$r}{qw(status_id revision)});
 		}
 	}
 	when(""){
@@ -386,14 +479,53 @@ sub salvage
 		my $referring_screen_name = shift();
 		my $referred_user_id = shift();
 		my $referred_screen_name = shift();
+		my $referred_hash = $#_ > 0 ? shift() : undef;
 		my $flag = shift();
 
-		if($B->{DBT_SALVAGE_7}->execute($status_id,$referring_user_id,$referring_screen_name,$referred_user_id,$referred_screen_name,$flag & F_TYPE_MASK,$flag & F_TYPE_MASK) > 0){
-			if($B->{DBT_SALVAGE_9}->execute($flag,$status_id,$referring_user_id,$referring_screen_name,$referred_user_id,$referred_screen_name,$flag & F_TYPE_MASK,$flag & F_TYPE_MASK) == 0){
+		if($B->{DBT_SALVAGE_7}->execute(
+			$status_id,
+			$referring_user_id,
+			$referring_user_id,
+			$referring_screen_name,
+			$referring_screen_name,
+			$referred_user_id,
+			$referred_user_id,
+			$referred_screen_name,
+			$referred_screen_name,
+			$referred_hash,
+			$referred_hash,
+			$flag & F_TYPE_MASK,
+			$flag & F_TYPE_MASK,
+		) > 0){
+			if($B->{DBT_SALVAGE_9}->execute(
+				$flag,
+				$status_id,
+				$referring_user_id,
+				$referring_user_id,
+				$referring_screen_name,
+				$referring_screen_name,
+				$referred_user_id,
+				$referred_user_id,
+				$referred_screen_name,
+				$referred_screen_name,
+				$referred_hash,
+				$referred_hash,
+				$flag & F_TYPE_MASK,
+				$flag & F_TYPE_MASK,
+			) == 0){
 				return();
 			}
 		}else{
-			if($B->{DBT_SALVAGE_8}->execute($status_id,$referring_user_id,$referring_screen_name,$referred_user_id,$referred_screen_name,$flag,$flag) == 0){
+			if($B->{DBT_SALVAGE_8}->execute(
+				$status_id,
+				$referring_user_id,
+				$referring_screen_name,
+				$referred_user_id,
+				$referred_screen_name,
+				$referred_hash,
+				$flag,
+				$flag,
+			) == 0){
 				return();
 			}
 		}
@@ -470,6 +602,9 @@ sub salvage
 		default{
 			return(-1);
 		}
+	}
+	if($axis >= 0){
+		$r = [reverse(@{$r})];
 	}
 
 	for my $structure (@{$r}){
@@ -557,9 +692,9 @@ sub salvage
 				}
 			}
 			when(F_RETWEETED){
-				for my $i (0..15){
+				for my $i (1..16){
 					my $r;
-					if(!($r = $B->{Net::Twitter}->retweeted_by({id =>$structure->{id},count =>200,page =>$i,include_entities =>1}))){
+					if(!($r = $B->{Net::Twitter}->retweeted_by({id =>$structure->{id},count =>100,page =>$i,include_entities =>1}))){
 						return(-1);
 					}
 					if(ref($r) && $#{$r} != -1){
@@ -648,22 +783,36 @@ sub salvage
 			}
 		}
 
+		$structure = {twitter =>$structure};
+		#if(!&r1_processer($structure,$flag)){
+		#	return(-1);
+		#}
+		#if(!&r2_processer($structure,$flag)){
+		#	return(-1);
+		#}
+		if(!&r3_processer($structure,$flag)){
+			return(-1);
+		}
+		if(!&r4_processer($structure,$flag)){
+			return(-1);
+		}
+
 		for(@flag){
 			$flag |= $_;
 		}
 
 		my $inserted_flag = 0;
-		if($B->{DBT_SALVAGE_12}->execute($structure->{id}) != 0){
+		if($B->{DBT_SALVAGE_12}->execute($structure->{twitter}->{id}) != 0){
 			$inserted_flag = ($B->{DBT_SALVAGE_12}->fetchrow_array())[0] // 0;
 		}
 		if($flag & F_REGULAR && !($inserted_flag & F_RETWEETED)){
 			if($B->{DBT_SALVAGE_11}->execute(
-				$structure->{id},
-				$structure->{user}->{id},
-				$structure->{user}->{screen_name},
-				$structure->{text},
-				encode_MySQLTime($structure->{created_at}),
-				gzip({twitter =>$structure}),
+				$structure->{twitter}->{id},
+				$structure->{twitter}->{user}->{id},
+				$structure->{twitter}->{user}->{screen_name},
+				$structure->{twittotter}->{text_deployed},
+				encode_MySQLTime($structure->{twitter}->{created_at}),
+				gzip($structure),
 				$flag,
 				$flag,
 			) == 0){
@@ -671,12 +820,12 @@ sub salvage
 			}
 		}else{
 			if($B->{DBT_SALVAGE_6}->execute(
-				$structure->{id},
-				$structure->{user}->{id},
-				$structure->{user}->{screen_name},
-				$structure->{text},
-				encode_MySQLTime($structure->{created_at}),
-				gzip({twitter =>$structure}),
+				$structure->{twitter}->{id},
+				$structure->{twitter}->{user}->{id},
+				$structure->{twitter}->{user}->{screen_name},
+				$structure->{twittotter}->{text_deployed},
+				encode_MySQLTime($structure->{twitter}->{created_at}),
+				gzip($structure),
 				$flag,
 				$flag,
 			) == 0){
@@ -686,6 +835,184 @@ sub salvage
 	}
 
 	return($#{$r} + 1);
+}
+
+sub r1_processer
+{
+	my $structure = shift();
+	my $flag = shift();
+
+	return();
+}
+
+sub r2_processer
+{
+	my $structure = shift();
+	my $flag = shift();
+
+	$structure = $structure->{twitter};
+
+	for my $i (1..16){
+		my $r;
+		if(!($r = $B->{Net::Twitter}->retweeted_by({id =>$structure->{id},count =>100,page =>$i,include_entities =>1}))){
+			return();
+		}
+		if(ref($r) && $#{$r} != -1){
+			for(@{$r}){
+				&bind(
+					$structure->{id},
+					$_->{id},
+					$_->{screen_name},
+					$structure->{user}->{id},
+					$structure->{user}->{screen_name},
+					F_REGULAR | F_RETWEETED | F_SYNCHRONIZED,
+				);
+			}
+			push(@{$structure->{retweeted_by}},@{$r});
+		}else{
+			last();
+		}
+	}
+
+	return(1);
+}
+
+sub r3_processer
+{
+	my $structure = shift();
+	my $flag = shift();
+
+	if($structure->{twitter}->{retweeted_status}->{user}->{id} != 0){
+		$structure->{twittotter} = {
+			text =>sprintf("RT \@%s: %s",$structure->{twitter}->{retweeted_status}->{user}->{screen_name},$structure->{twitter}->{retweeted_status}->{text}),
+			entities =>Clone::clone($structure->{twitter}->{retweeted_status}->{entities}),
+		};
+	}else{
+		$structure->{twittotter} = {
+			text =>$structure->{twitter}->{text},
+			entities =>Clone::clone($structure->{twitter}->{entities}),
+		};
+	}
+	$structure->{twittotter}->{text_deployed} = $structure->{twittotter}->{text};
+	$structure->{twitpic} = [];
+	$structure->{yfrog} = [];
+	$structure->{flickr} = [];
+	$structure->{youtube} = [];
+
+	for(@{$structure->{twittotter}->{entities}->{urls}},@{$structure->{twittotter}->{entities}->{media}}){
+		if(defined($_->{expanded_url})){
+			my($code,undef,undef,undef) = $B->{BlackCurtain::Fragility}->spider($_->{expanded_url},"none");
+			if($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/bgm-fes\.jp\//io){
+				# http://bgm-fes.jp/
+				# 正常なHTMLを常に HTTP/1.1 503 Service Unavailable で応答してくる糞サイト、死ぬべき
+				$code = 200;
+			}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.toranoana\.jp\//io){
+				# http://www.toranoana.jp/*
+				# 年齢認証で403を返す、アホ？
+				$code = -1;
+			}
+			if($code == 200){
+				$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
+				$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+			}elsif($code == 401){
+				$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
+				$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+				warn("Failed spider ".$_->{expanded_url}.", returned ".$code);
+			}elsif($code == 404){
+				$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
+				$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+				warn("Failed spider ".$_->{expanded_url}.", returned ".$code);
+			}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->{_msg} =~ /connect: Connection timed out/io){
+				warn("Failed spider ".$_->{expanded_url}.", returned ".$code.", Bullshit server.");
+			}elsif($code == -1){
+				$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
+				$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+				warn("Failed spider ".$_->{expanded_url}.", returned ".$code);
+			}else{
+				warn("Failed spider ".$_->{expanded_url}.", returned ".$code);
+				return();
+			}
+		}
+	}
+
+	for($structure->{twittotter}->{text_deployed} =~m/(?<![^ ])#(\w+)(?![^ ])/o){
+		&bind(
+			$structure->{twitter}->{id},
+			$structure->{twitter}->{user}->{id},
+			$structure->{twitter}->{user}->{screen_name},
+			undef,
+			undef,
+			$_,
+			$flag | F_HASH,
+		);
+	}
+
+	for($structure->{twittotter}->{text_deployed} =~m/http:\/\/twitpic\.com\/([0-9A-Za-z_]+)/io){
+		my $id = $1;
+		my($code,undef,$r,undef) = eval{$B->{BlackCurtain::Fragility}->spider(sprintf("http://api.twitpic.com/2/media/show.xml?id=%s",$id),"xml")};
+		if($@){
+			warn($@);
+			($code,$r,undef,undef) = $B->{BlackCurtain::Fragility}->spider(sprintf("http://api.twitpic.com/2/media/show.xml?id=%s",$id),"none");
+			$r =~s/<message>.*?<\/message>/<message><\/message>/igo;
+			$r = XML::Simple::XMLin($r);
+		}
+		if($code == 200){
+			push(@{$structure->{twitpic}},$r);
+		}elsif($code == 404){
+			warn("Failed spider ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
+		}else{
+			warn("Failed spider ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
+			return();
+		}
+	}
+	for($structure->{twittotter}->{text_deployed} =~m/http:\/\/yfrog\.com\/([0-9A-Za-z_]+)/io){
+		my($code,undef,$r,undef) = $B->{BlackCurtain::Fragility}->spider(sprintf("http://yfrog.com/api/xmlInfo?path=%s",$1),"xml");
+		if($code == 200){
+			push(@{$structure->{yfrog}},$r);
+		}elsif($code == 404){
+			warn("Failed spider ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
+		}else{
+			warn("Failed spider ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
+			return();
+		}
+	}
+	for($structure->{twittotter}->{text_deployed} =~m/http:\/\/www.flickr.com\/photos\/[^\/]+?\/([0-9A-Za-z_]+)/io){
+		my($code,undef,$r,undef) = $B->{BlackCurtain::Fragility}->spider(sprintf("http://api.flickr.com/services/rest?method=flickr.photos.getInfo&api_key=%s&secret=%s&photo_id=%s",$C->{API}->{FLICKR_KEY},$C->{API}->{FLICKR_SECRET},$1),"xml");
+		if($code == 200){
+			push(@{$structure->{flickr}},$r);
+		}elsif($code == 404){
+			warn("Failed spider ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
+		}else{
+			warn("Failed spider ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
+			return();
+		}
+	}
+	for($structure->{twittotter}->{text_deployed} =~m/http:\/\/www\.youtube\.com\/watch\?v=([0-9A-Za-z_-]+)/io){
+		my($code,undef,$r,undef) = $B->{BlackCurtain::Fragility}->spider(sprintf("http://gdata.youtube.com/feeds/api/videos/%s",$1),"xml");
+		if($code == 200){
+			push(@{$structure->{youtube}},$r);
+		}elsif($code == 404){
+			warn("Failed spider ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
+		}else{
+			warn("Failed spider ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
+			return();
+		}
+	}
+
+	return(1);
+}
+
+sub r4_processer
+{
+	my $structure = shift();
+	my $flag = shift();
+
+	$structure = $structure->{twitter};
+
+	my %b;
+	$structure->{retweeted_by} = [grep{$b{$_->{id}}++ == 0}@{$structure->{retweeted_by}}];
+
+	return(1);
 }
 
 sub cb_prepare
@@ -707,7 +1034,7 @@ sub cb_prepare
 		);
 	}
 	if(!$B->{Net::Twitter}){
-		if($g->{regular}){
+		if($d->{regular}){
 			return();
 		}
 		$B->{Net::Twitter} = Net::Twitter->new(
@@ -725,17 +1052,28 @@ sub cb_prepare
 sub cb_index
 {
 	if(!defined($GET{op})){
-		return("Text::Xslate",{},data =><<'EOF');
-<html>
-<head>
-<title>ついっとったー</title>
-<body>
-<p><a href="/?op=login">login</a></p>
-<p><a href="/?op=logout">logout</a></p>
-<p><a href="/el1n">こんな感じ</a></p>
-</body>
-</html>
-EOF
+		my $r;
+		my $sign = join(".",$C->{_}->{CACHE_PREFIX},"index");
+		if(!defined($r = $B->{Cache::Memcached}->get($sign))){
+			$r = {
+				id =>undef,
+				name =>"ついっとったー",
+				profile_background_color =>"C0DEED",
+				profile_image_url =>"/img/twittotter.png",
+				profile_image_url_https =>"/img/twittotter.png",
+				profile_link_color =>"0084B4",
+				profile_sidebar_border_color =>"C0DEED",
+				profile_sidebar_fill_color =>"DDEEF6",
+				profile_text_color =>"'333333'",
+				screen_name =>undef,
+			};
+			if($B->{DBT_INDEX_1}->execute("test") == 0){
+			}
+			map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_INDEX_1}->fetchall_arrayref({})};
+			$B->{Cache::Memcached}->set($sign,$r,$C->{Cache}->{DEFAULT_EXPIRE});
+		}
+
+		return("Text::Xslate",$r // {},file =>"core.Xslate");
 	}elsif($GET{op} eq "login" && $GET{oauth_token} && $GET{oauth_verifier}){
 		$B->{Net::Twitter}->request_token($SES{REQUEST_TOKEN});
 		$B->{Net::Twitter}->request_token_secret($SES{REQUEST_TOKEN_SECRET});
@@ -811,6 +1149,28 @@ sub cb_show
 	my $user_id = user_id($screen_name);
 	#$clause .= $GET{c};
 
+	my $time = time();
+	my @time = localtime($time);
+	%BORROW = (
+		IS_SHOW =>1,
+		IS_STATIC =>length($clause) == 1 && $clause =~ /^[zjtmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) && !defined($g[3]) && !defined($g[4]) && $g[7] == 0 ? 1 : 0,
+		IS_SEARCH =>length($clause) == 1 && $clause =~ /^[zjtmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) ? 0 : 1,
+
+		location =>$location,
+		u =>$time,
+		s =>$time[0],
+		n =>$time[1],
+		h =>$time[2],
+		d =>$time[3],
+		m =>$time[4] + 1,
+		y =>$time[5] + 1900,
+		w =>$time[6],
+		cal =>{
+			m =>$m->[9] // $GET{"m-"} // ($m->[8] ? 12 : $time[4] + 1),
+			y =>$m->[8] // $GET{"y-"} // $time[5] + 1900,
+		},
+	);
+
 	my $r;
 	my $sign = join(".",$C->{_}->{CACHE_PREFIX},$screen_name).".";
 	if(!defined($r = $B->{Cache::Memcached}->get($sign."profile"))){
@@ -830,44 +1190,75 @@ sub cb_show
 
 		$B->{Cache::Memcached}->set($sign."profile",$r,$C->{Cache}->{PROFILE_EXPIRE});
 	}
-	$r->{IS_SEARCH} = length($clause) == 1 && $clause =~ /^[zjtmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) ? 0 : 1;
-	$r->{STATIC} = length($clause) == 1 && $clause =~ /^[zjtmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) && !defined($g[3]) && !defined($g[4]) && $g[7] == 0 ? 1 : 0;
 
 	sub prepare_structure
 	{
-		my $g = shift() // $_;
+		my $g = unpack_structure(shift());
+		my $structure = $g->{structure}->{twitter};
+		$structure->{text} = $g->{structure}->{twittotter}->{text};
+		$structure->{entities} = $g->{structure}->{twittotter}->{entities};
 
-		unpack_structure($g);
-		$g = $g->{structure}->{twitter};
-
-		for(@{$g->{entities}->{urls}},@{$g->{entities}->{media}}){
+		for(@{$structure->{entities}->{media}},@{$structure->{entities}->{urls}}){
 			if(defined($_->{expanded_url})){
-				#$g->{text} =~s/$_->{url}/$_->{expanded_url}/g;
-				$g->{text} =~s/$_->{url}/<a href="$_->{expanded_url}" target="_blank">$_->{expanded_url}<\/a>/g;
+				if($_->{expanded_url} =~ /^http:\/\/twitpic\.com\/([0-9A-Za-z_]+)$/io){
+					my @g = @{(grep{$_->{short_id} == $1}@{$g->{structure}->{twitpic}})[0]}{qw(id type)};
+					$_->{media_url} = sprintf("http://s1-01.twitpicproxy.com/photos/full/%s.%s",@g);
+					$_->{thumb_url} = sprintf("http://s1-01.twitpicproxy.com/photos/thumb/%s.%s",@g);
+					push(@{$structure->{entities}->{media}},$_);
+				}elsif($_->{expanded_url} =~ /^(http:\/\/yfrog\.com\/[0-9A-Za-z_]+)$/io){
+					my @g = @{(grep{$_->{links}->{yfrog_link} == $1}@{$g->{structure}->{yfrog}})[0]->{links}}{qw(image_link yfrog_thumb)};
+					$_->{media_url} = shift(@g);
+					$_->{thumb_url} = shift(@g);
+					push(@{$structure->{entities}->{media}},$_);
+				}elsif($_->{expanded_url} =~ /^(http:\/\/www\.flickr\.com\/photos\/.+?)$/io){
+					my @g = @{(grep{$_->{photo}->{urls}->{url}->{content} == $1}@{$g->{structure}->{flickr}})[0]->{photo}}{qw(farm server id secret)};
+					$_->{media_url} = sprintf("http://farm%s.staticflickr.com/%s/%s_%s_b.jpg",@g);
+					$_->{thumb_url} = sprintf("http://farm%s.staticflickr.com/%s/%s_%s_t.jpg",@g);
+					push(@{$structure->{entities}->{media}},$_);
+				}elsif(defined($_->{media_url_https})){
+					$_->{media_url} = $_->{media_url_https};
+					$_->{thumb_url} = $_->{media_url_https};
+				}
+				if(defined($_->{media_url})){
+					#$structure->{text} =~s/$_->{url}/$_->{expanded_url}/g;
+					$structure->{text} =~s/$_->{url}/<a href="$_->{expanded_url}" target="_blank">$_->{expanded_url}<\/a>&nbsp;<a href="$_->{media_url}" target="_blank">&raquo;<\/a>/g;
+				}else{
+					#$structure->{text} =~s/$_->{url}/$_->{expanded_url}/g;
+					$structure->{text} =~s/$_->{url}/<a href="$_->{expanded_url}" target="_blank">$_->{expanded_url}<\/a>/g;
+				}
 			}else{
-				$g->{text} =~s/$_->{url}/<a href="$_->{url}" target="_blank">$_->{url}<\/a>/g;
+				$structure->{text} =~s/$_->{url}/<a href="$_->{url}" target="_blank">$_->{url}<\/a>/g;
 			}
 		}
-		for(@{$g->{entities}->{media}}){
-			if(defined($_->{expanded_url})){
-				#$g->{text} =~s/$_->{display_url}/$_->{expanded_url}/g;
-				$g->{text} =~s/$_->{display_url}/<a href="$_->{expanded_url}" target="_blank">$_->{expanded_url}<\/a>/g;
-			}else{
-				$g->{text} =~s/$_->{display_url}/<a href="$_->{display_url}" target="_blank">$_->{display_url}<\/a>/g;
-			}
-		}
-		#$g->{text} =~s/((?:ht|f)tps?:\/{2}[^\/]+\/[\x21-\x7E]+)/<a href="$1" target="_blank">$1<\/a>/g;
-		$g->{text} =~s/(?!=[^ ])(#\w+)(?![^ ])/ <a href="https:\/\/twitter.com\/#!\/search\/$1" target="_blank">$1<\/a>/g;
-		$g->{text} =~s/^RT \@([0-9A-Za-z_]{1,15}):/RT <a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>&nbsp;<a href="https:\/\/twitter.com\/#!\/$1\/status\/$g->{retweeted_status}->{id}" target="_blank">&raquo;<\/a>:/g;
-		$g->{text} =~s/^\@([0-9A-Za-z_]{1,15})/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>&nbsp;<a href="https:\/\/twitter.com\/#!\/$1\/status\/$g->{in_reply_to_status_id}" target="_blank">&raquo;<\/a>/g;
-		$g->{text} =~s/(?<!>)\@([0-9A-Za-z_]{1,15})/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>/g;
 
-		$g->{created_at_formatted} = encode_DateTime($g->{created_at})->strftime("%Y-%m-%d %H:%M");
+		#$structure->{text} =~s/((?:ht|f)tps?:\/{2}[^\/]+\/[\x21-\x7E]+)/<a href="$1" target="_blank">$1<\/a>/g;
+		$structure->{text} =~s/(?<![^ ])(#\w+)(?![^ ])/<a href="https:\/\/twitter.com\/#!\/search\/$1" target="_blank">$1<\/a>/g;
+		$structure->{text} =~s/^RT \@([0-9A-Za-z_]{1,15}):/RT <a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>&nbsp;<a href="https:\/\/twitter.com\/#!\/$1\/status\/$structure->{retweeted_status}->{id}" target="_blank">&raquo;<\/a>:/g;
+		$structure->{text} =~s/^\@([0-9A-Za-z_]{1,15})/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>&nbsp;<a href="https:\/\/twitter.com\/#!\/$1\/status\/$structure->{in_reply_to_status_id}" target="_blank">&raquo;<\/a>/g;
+		$structure->{text} =~s/\@([0-9A-Za-z_]{1,15})(?![^<>]+>)(?![^<>]+<\/a>)/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>/g;
 
-		return($g);
+		$structure->{created_at_formatted} = encode_DateTime($structure->{created_at})->strftime("%Y-%m-%d %H:%M");
+
+		return($structure);
 	}
 
-	if($clause eq "j"){
+	if($r->{protected} && $SES{id} != $r->{id}){
+	}elsif($clause eq "n"){
+		$r = {
+			id =>"",
+			name =>"",
+			profile_background_color =>"C0DEED",
+			profile_image_url =>"/img/twittotter.png",
+			profile_image_url_https =>"/img/twittotter.png",
+			profile_link_color =>"0084B4",
+			profile_sidebar_border_color =>"C0DEED",
+			profile_sidebar_fill_color =>"DDEEF6",
+			profile_text_color =>"'333333'",
+			profile_use_background_image =>"1",
+			protected =>1,
+			screen_name =>"",
+		};
+	}elsif($clause eq "j"){
 		if(!defined($r->{queue} = $B->{Cache::Memcached}->get($sign.$clause))){
 			if(!$B->{DBT_SHOW_0}->execute($user_id,$screen_name)){
 			}
@@ -878,7 +1269,7 @@ sub cb_show
 			push(@{$r->{queue}},($B->{DBT_SEARCH_0}->fetchrow_array())[0]);
 			$B->{Cache::Memcached}->set($sign.$clause,$r->{queue},$C->{Cache}->{QUEUE_EXPIRE});
 		}
-	}elsif(!$r->{STATIC} || !defined($r->{status} = $B->{Cache::Memcached}->get($sign.$clause))){
+	}elsif(!$r->{IS_STATIC} || !defined($r->{status} = $B->{Cache::Memcached}->get($sign.$clause))){
 		my @where_time;
 		my @where_base;
 		my @where_char;
@@ -955,7 +1346,7 @@ sub cb_show
 		$B->{DBT_SEARCH_0}->execute();
 		push(@{$r->{status}},($B->{DBT_SEARCH_0}->fetchrow_array())[0]);
 
-		if($r->{STATIC}){
+		if($r->{IS_STATIC}){
 			$B->{Cache::Memcached}->set($sign.$clause,$r->{status},$C->{Cache}->{STATIC_STATUS_EXPIRE});
 		}
 	}
@@ -966,24 +1357,6 @@ sub cb_show
 	}else{
 		$r->{rows} = 0;
 	}
-
-	my $time = time();
-	my @time = localtime($time);
-	%BORROW = (
-		location =>$location,
-		u =>$time,
-		s =>$time[0],
-		n =>$time[1],
-		h =>$time[2],
-		d =>$time[3],
-		m =>$time[4] + 1,
-		y =>$time[5] + 1900,
-		w =>$time[6],
-		cal =>{
-			m =>$m->[9] // $GET{"m-"} // ($m->[8] ? 12 : $time[4] + 1),
-			y =>$m->[8] // $GET{"y-"} // $time[5] + 1900,
-		},
-	);
 
 	return($issue ? $issue : "Text::Xslate",$r // {},file =>"core.Xslate");
 }
