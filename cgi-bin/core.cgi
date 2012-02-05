@@ -1094,6 +1094,8 @@ sub cb_index
 		}else{
 			return(&cb_exception(undef,undef,undef,"認証失敗"));
 		}
+	}elsif($GET{op} eq "login" && $SES{user_id}){
+		return("jump","http://".$ENV{HTTP_HOST}.$ENV{SCRIPT_NAME}."/".$SES{screen_name});
 	}elsif($GET{op} eq "login"){
 		my $r = $B->{Net::Twitter}->get_authorization_url(callback =>"http://".$ENV{HTTP_HOST}.$ENV{SCRIPT_NAME}."/?op=login");
 		$SES{REQUEST_TOKEN} = $B->{Net::Twitter}->request_token();
@@ -1101,6 +1103,9 @@ sub cb_index
 
 		return("jump",$r);
 	}elsif($GET{op} eq "logout"){
+		map{$SES{$_} = undef}grep(!/^_/o,keys(%SES));
+
+		return("jump","http://".$ENV{HTTP_HOST}.$ENV{SCRIPT_NAME}."/");
 	}else{
 	}
 	return("raw","unknown op");
@@ -1313,13 +1318,14 @@ sub cb_show
 				push(@bind,($user_id,$screen_name,$flag,$flag)[0..$l - 1]);
 			}
 		}
-		for(split(/\s+/o,$GET{grep})){
-			push(@where_char,$C->{MySQL}->{SEARCH_5_NP});
-			push(@bind,"%".$_."%");
-		}
-		if(defined($GET{egrep})){
+		if($GET{e} || defined($GET{egrep})){
 			push(@where_char,$C->{MySQL}->{SEARCH_6_NP});
-			push(@bind,$GET{egrep});
+			push(@bind,$GET{egrep} // $GET{grep});
+		}else{
+			for(split(/\s+/o,$GET{grep})){
+				push(@where_char,$C->{MySQL}->{SEARCH_5_NP});
+				push(@bind,"%".$_."%");
+			}
 		}
 
 		my @embed = (
