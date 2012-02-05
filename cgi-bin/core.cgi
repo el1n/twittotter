@@ -13,6 +13,7 @@ use Cache::Memcached::libmemcached;
 use XML::Simple;
 use Config::Tiny;
 use BlackCurtain::Ignorance;
+use URI::Escape;
 use DateTime;
 use DateTime::Locale;
 use DateTime::Format::DateParse;
@@ -113,7 +114,7 @@ SALVAGE_11=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_a
 SALVAGE_12=SELECT `flag` FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 
 INDEX_0=INSERT `Token` (`user_id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE `ctime` = CURRENT_TIMESTAMP
-INDEX_1=SELECT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` RIGHT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `referred_hash` = ?
+INDEX_1=SELECT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` RIGHT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `referring_screen_name` = ? AND `referred_hash` = ?
 SHOW_0=SELECT * FROM `Queue` WHERE `user_id` = ? OR `screen_name` = ? ORDER BY `ctime` DESC LIMIT 0,48
 SHOW_1=SELECT COUNT(*) FROM `Queue` WHERE `user_id` = ? OR `screen_name` = ? ORDER BY `ctime` DESC LIMIT 0,48
 SHOW_2=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referring_screen_name` ORDER BY `i` DESC LIMIT 0,8
@@ -242,7 +243,7 @@ if(defined($ENV{GATEWAY_INTERFACE})){
 			[qr/^(\/(\w+)(?:\.([abd-z]+))?(?:\/([a-z]+))?(?:\/(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?(\-)?(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?)?)(?:\/(\d+))?\/?$/,16,\&cb_show],
 		],
 		CGI::Session =>["driver:memcached",undef,{Memcached =>$B->{Cache::Memcached}}],
-		Text::Xslate =>[path =>[split(/ /o,$C->{_}->{TEMPLATE})],cache_dir =>$C->{_}->{CACHE_DIR},module =>[qw(Text::Xslate::Bridge::Star Calendar::Simple)]],
+		Text::Xslate =>[path =>[split(/ /o,$C->{_}->{TEMPLATE})],cache_dir =>$C->{_}->{CACHE_DIR},module =>[qw(Text::Xslate::Bridge::Star Calendar::Simple URI::Escape)]],
 	)->perform();
 }else{
 
@@ -287,11 +288,11 @@ given(shift(@ARGV)){
 				#&new_queue($user_id,$screen_name,"SALVAGE.MENTION",I_PRIORITY_HIGH,0,F_REPLIES);
 				#&new_queue($user_id,$screen_name,"SALVAGE.RETWEETED",I_PRIORITY_HIGH,0,F_RETWEETED);
 				#&new_queue($user_id,$screen_name,"SALVAGE.FAVORITE",I_PRIORITY_HIGH,0,F_FAVORITES);
-				&new_queue($user_id,$screen_name,"UPDATE.TIMELINE",I_PRIORITY_HIGH,0,F_TWEETS);
+				#&new_queue($user_id,$screen_name,"UPDATE.TIMELINE",I_PRIORITY_HIGH,0,F_TWEETS);
 				#&new_queue($user_id,$screen_name,"UPDATE.MENTION",I_PRIORITY_HIGH,0,F_REPLIES);
 				#&new_queue($user_id,$screen_name,"UPDATE.FAVORITE",I_PRIORITY_HIGH,0,F_FAVORITES);
 				#&new_queue($user_id,$screen_name,"UPDATE.RETWEETED",I_PRIORITY_HIGH,0,F_RETWEETED);
-				#&new_queue($user_id,$screen_name,"UPDATE.TIMELINE.ALL",I_PRIORITY_LOW,0,F_TIMELINE);
+				&new_queue($user_id,$screen_name,"UPDATE.TIMELINE.ALL",I_PRIORITY_LOW,0,F_TIMELINE);
 				#&new_queue($user_id,$screen_name,"COMPARE.TIMELINE",I_PRIORITY_HIGH,0,F_TWEETS);
 				#&new_queue($user_id,$screen_name,"COMPARE.MENTION",I_PRIORITY_HIGH,0,F_REPLIES);
 				#&new_queue($user_id,$screen_name,"COMPARE.RETWEETED",I_PRIORITY_HIGH,0,F_RETWEETED);
@@ -355,7 +356,7 @@ given(shift(@ARGV)){
 
 		if($r->{order} =~ /^(UPDATE)/io){
 			$r->{priority} = I_PRIORITY_LOW;
-			$r->{atime} = 1200;
+			$r->{atime} = 1800;
 			&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
 			&new_queue(@{$r}{qw(user_id screen_name order priority atime flag)});
 		}elsif($i != 0){
@@ -557,34 +558,64 @@ sub salvage
 	my $r = [];
 	given($flag & F_API_MASK){
 		when(F_TWEETS){
-			if(!($r = $B->{Net::Twitter}->user_timeline({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
-				warn("Net::Twitter->user_timeline returned null.");
-				return(-1);
-			}
+			my $status;
+			my $i = 1;
+			do{
+				if(!($status = $B->{Net::Twitter}->user_timeline({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,page =>$i,include_entities =>1,include_rts =>1}))){
+					warn();
+					return(-1);
+				}
+				push(@{$r},@{$status});
+				++$i;
+			}while($axis >= 0 && $#{$status} == 199);
 		}
 		when(F_REPLIES){
-			if(!($r = $B->{Net::Twitter}->mentions({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
-				warn("Net::Twitter->mentions returned null.");
-				return(-1);
-			}
+			my $status;
+			my $i = 1;
+			do{
+				if(!($status = $B->{Net::Twitter}->mentions({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,page =>$i,include_entities =>1,include_rts =>1}))){
+					warn();
+					return(-1);
+				}
+				push(@{$r},@{$status});
+				++$i;
+			}while($axis >= 0 && $#{$status} == 199);
 		}
 		when(F_RETWEETED){
-			if(!($r = $B->{Net::Twitter}->retweets_of_me({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,include_entities =>1}))){
-				warn("Net::Twitter->retweets_of_me returned null.");
-				return(-1);
-			}
+			my $status;
+			my $i = 1;
+			do{
+				if(!($status = $B->{Net::Twitter}->retweets_of_me({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,page =>$i,include_entities =>1,include_rts =>1}))){
+					warn();
+					return(-1);
+				}
+				push(@{$r},@{$status});
+				++$i;
+			}while($axis >= 0 && $#{$status} == 199);
 		}
 		when(F_FAVORITES){
-			if(!($r = $B->{Net::Twitter}->favorites({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
-				warn("Net::Twitter->favorites returned null.");
-				return(-1);
-			}
+			my $status;
+			my $i = 1;
+			do{
+				if(!($status = $B->{Net::Twitter}->favorites({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,page =>$i,include_entities =>1,include_rts =>1}))){
+					warn();
+					return(-1);
+				}
+				push(@{$r},@{$status});
+				++$i;
+			}while($axis >= 0 && $#{$status} == 199);
 		}
 		when(F_TIMELINE){
-			if(!($r = $B->{Net::Twitter}->friends_timeline({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,include_entities =>1,include_rts =>1}))){
-				warn("Net::Twitter->friends_timeline returned null.");
-				return(-1);
-			}
+			my $status;
+			my $i = 1;
+			do{
+				if(!($status = $B->{Net::Twitter}->friends_timeline({id =>$user_id,&edge($user_id,$flag,$axis),count =>200,page =>$i,include_entities =>1,include_rts =>1}))){
+					warn();
+					return(-1);
+				}
+				push(@{$r},@{$status});
+				++$i;
+			}while($axis >= 0 && $#{$status} == 199);
 		}
 		default{
 			warn("Unknown flag.");
@@ -902,11 +933,18 @@ sub r3_processer
 				# http://www.toranoana.jp/*
 				# 年齢認証で403を返す、アホ？
 				$code = -1;
+			}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/lockerz.com\//io){
+				# http://lockerz.com/s/180622748/*
+				# すぐ500吐くゴミ鯖
 			}
 			if($code == 200){
 				$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
 				$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
 			}elsif($code == 401){
+				$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
+				$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+				warn("Failed spider ".$_->{expanded_url}.", returned ".$code);
+			}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/twitter.com\/.+?\/photo\//io){
 				$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
 				$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
 				warn("Failed spider ".$_->{expanded_url}.", returned ".$code);
@@ -1026,17 +1064,17 @@ sub cb_prepare
 		);
 	}
 	if(!$B->{Net::Twitter}){
-		if($d->{regular}){
-			return();
-		}
 		$B->{Net::Twitter} = Net::Twitter->new(
 			traits =>[qw(API::REST API::Search OAuth WrapError RetryOnError)],
 			consumer_key =>$C->{Twitter}->{CONSUMER_KEY},
 			consumer_secret =>$C->{Twitter}->{CONSUMER_SECRET},
-			access_token =>$C->{Twitter}->{ACCESS_TOKEN},
-			access_token_secret =>$C->{Twitter}->{ACCESS_TOKEN_SECRET},
+			#access_token =>$C->{Twitter}->{ACCESS_TOKEN},
+			#access_token_secret =>$C->{Twitter}->{ACCESS_TOKEN_SECRET},
 			max_retries =>2,
 		);
+	}
+	if($d->{regular} && !$B->{Net::Twitter}->verify_credentials()){
+		die("verify_credentials() is failed. [".$SES{screen_name}."#".$SES{user_id}."]");
 	}
 	return(1);
 }
@@ -1059,7 +1097,7 @@ sub cb_index
 				profile_text_color =>"'333333'",
 				screen_name =>undef,
 			};
-			if($B->{DBT_INDEX_1}->execute("test") == 0){
+			if($B->{DBT_INDEX_1}->execute("xmms","twittotter") == 0){
 			}
 			map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_INDEX_1}->fetchall_arrayref({})};
 			$B->{Cache::Memcached}->set($sign,$r,$C->{Cache}->{DEFAULT_EXPIRE});
@@ -1229,10 +1267,16 @@ sub cb_show
 		}
 
 		#$structure->{text} =~s/((?:ht|f)tps?:\/{2}[^\/]+\/[\x21-\x7E]+)/<a href="$1" target="_blank">$1<\/a>/g;
-		$structure->{text} =~s/(?<![^ ])(#\w+)(?![^ ])/<a href="https:\/\/twitter.com\/#!\/search\/$1" target="_blank">$1<\/a>/g;
-		$structure->{text} =~s/^RT \@([0-9A-Za-z_]{1,15}):/RT <a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>&nbsp;<a href="https:\/\/twitter.com\/#!\/$1\/status\/$structure->{retweeted_status}->{id}" target="_blank">&raquo;<\/a>:/g;
-		$structure->{text} =~s/^\@([0-9A-Za-z_]{1,15})/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>&nbsp;<a href="https:\/\/twitter.com\/#!\/$1\/status\/$structure->{in_reply_to_status_id}" target="_blank">&raquo;<\/a>/g;
-		$structure->{text} =~s/\@([0-9A-Za-z_]{1,15})(?![^<>]+>)(?![^<>]+<\/a>)/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>/g;
+		#$structure->{text} =~s/(?<![^ ])(#\w+)(?![^ ])/<a href="https:\/\/twitter.com\/#!\/search\/$1" target="_blank">$1<\/a>/g;
+		$structure->{text} =~s/(?<![^ ])(#\w+)(?![^ ])/"<a href=\"https:\/\/twitter.com\/#!\/search\/".uri_escape_utf8($1)."\" target=\"_blank\">$1<\/a>"/eg;
+
+		if(defined($structure->{retweeted_status}->{id})){
+			$structure->{text} =~s/^RT \@([0-9A-Za-z_]{1,15}):/RT <a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>&nbsp;<a href="https:\/\/twitter.com\/#!\/$1\/status\/$structure->{retweeted_status}->{id}" target="_blank">&raquo;<\/a>:/g;
+		}elsif(defined($structure->{in_reply_to_status_id})){
+			$structure->{text} =~s/^\@([0-9A-Za-z_]{1,15})/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>&nbsp;<a href="https:\/\/twitter.com\/#!\/$1\/status\/$structure->{in_reply_to_status_id}" target="_blank">&raquo;<\/a>/g;
+		}else{
+			$structure->{text} =~s/\@([0-9A-Za-z_]{1,15})(?![^<>]+>)(?![^<>]+<\/a>)/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>/g;
+		}
 
 		$structure->{created_at_formatted} = encode_DateTime($structure->{created_at})->strftime("%Y-%m-%d %H:%M");
 

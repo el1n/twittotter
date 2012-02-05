@@ -227,7 +227,6 @@ a:hover,a:active {
 			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "u" ? "active" : "inactive":>"><a href="/<:$screen_name:>/u">くおとついっと された</a></div>
 			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "f" ? "active" : "inactive":>"><a href="/<:$screen_name:>/f"><span style="color:yellow;">&#9733;</span>　した</a></div>
 			<div class="<:$BORROW.IS_SEARCH ? "active" : "inactive":>"><a href="/<:$screen_name:>/s">けんさく</a></div>
-			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "i" ? "active" : "inactive":>"><a href="/<:$screen_name:>/i">じょうほう</a></div>
 			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "j" ? "active" : "inactive":>"><a href="/<:$screen_name:>/j">きゅー</a></div>
 			<div class="conf">
 				表示設定
