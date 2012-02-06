@@ -63,11 +63,11 @@ CACHE_PREFIX=twittotter
 LIMIT=48
 
 [Cache]
-DEFAULT_EXPIRE=7200
+DEFAULT_EXPIRE=600
 PROFILE_EXPIRE=7200
-STATIC_STATUS_EXPIRE=7200
+STATIC_STATUS_EXPIRE=3600
 STATUS_EXPIRE=1800
-QUEUE_EXPIRE=0
+QUEUE_EXPIRE=1
 
 [MySQL]
 HOST=localhost
@@ -83,12 +83,13 @@ METHOD_2=SELECT `user_id` FROM `Tweet` WHERE `screen_name` = ? LIMIT 0,1
 METHOD_3=SELECT `screen_name` FROM `Token` WHERE `user_id` = ? LIMIT 0,1
 METHOD_4=SELECT `screen_name` FROM `Queue` WHERE `user_id` = ? LIMIT 0,1
 METHOD_5=SELECT `screen_name` FROM `Tweet` WHERE `user_id` = ? LIMIT 0,1
+METHOD_6=INSERT `Statistics` (`label`,`hash`) VALUES(?,SHA1(CONCAT_WS('/',?,DATE(CURRENT_TIMESTAMP)))) ON DUPLICATE KEY UPDATE `integer` = `integer` + 1
 CLI_QC_0=TRUNCATE TABLE `Queue`
 CLI_QI_0=SELECT * FROM `Queue` WHERE `user_id` = ? AND `order` LIKE ? AND `flag` & ? = ? LIMIT 0,1
 CLI_QI_2=INSERT `Queue` (`user_id`,`screen_name`,`order`,`priority`,`atime`,`flag`) VALUES(?,?,?,?,DATE_ADD(CURRENT_TIMESTAMP,INTERVAL ? SECOND),?)
 CLI_QE_0=SELECT * FROM `Queue` LEFT JOIN `Token` ON `Queue`.`user_id` = `Token`.`user_id` WHERE `atime` <= CURRENT_TIMESTAMP AND `flag` & 1 ORDER BY `Queue`.`priority` DESC,`Queue`.`ctime` ASC LIMIT 0,1
 CLI_QE_1=UPDATE `Queue` SET `flag` = ?,`mtime` = CURRENT_TIMESTAMP WHERE `id` = ?
-CLI_QE_2=UPDATE `Queue` SET `id` = LAST_INSERT_ID(`id`),`atime` = DATE_ADD(CURRENT_TIMESTAMP,INTERVAL 1 MINUTE) WHERE `atime` <= CURRENT_TIMESTAMP AND `flag` & 1 ORDER BY `priority` DESC,`ctime` ASC LIMIT 1
+CLI_QE_2=UPDATE `Queue` SET `id` = LAST_INSERT_ID(`id`),`atime` = DATE_ADD(CURRENT_TIMESTAMP,INTERVAL 15 MINUTE) WHERE `atime` <= CURRENT_TIMESTAMP AND `flag` & 1 ORDER BY `priority` DESC,`ctime` ASC LIMIT 1
 CLI_QE_3=SELECT * FROM `Queue` LEFT JOIN `Token` ON `Queue`.`user_id` = `Token`.`user_id` WHERE `Queue`.`id` = LAST_INSERT_ID()
 CLI_R1_0=SELECT * FROM `Tweet` WHERE `revision` = 0 LIMIT 0,1
 CLI_R2_0=SELECT * FROM `Tweet` LEFT JOIN `Token` ON `Tweet`.`user_id` = `Token`.`user_id` WHERE `Tweet`.`revision` = 1 LIMIT 0,1
@@ -98,6 +99,10 @@ CLI_R3_0=SELECT * FROM `Tweet` WHERE `revision` = 2 LIMIT 0,1
 CLI_R3_1=UPDATE `Tweet` SET `text` = ?,`structure` = ?,`revision` = 3 WHERE `status_id` = ?
 CLI_R4_0=SELECT * FROM `Tweet` WHERE `revision` = 3 ORDER BY `created_at` DESC LIMIT 0,1
 CLI_R4_1=UPDATE `Tweet` SET `text` = ?,`structure` = ?,`revision` = 4 WHERE `status_id` = ?
+CLI_R5_0=SELECT * FROM `Tweet` WHERE `revision` = 4 ORDER BY `created_at` DESC LIMIT 0,1
+CLI_R5_1=UPDATE `Tweet` SET `text` = ?,`structure` = ?,`revision` = 5 WHERE `status_id` = ?
+CLI_R5_2=UPDATE `Tweet` SET `revision` = 5 WHERE `status_id` = ?
+CLI_SD_0=SELECT * FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 
 SALVAGE_0=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,1
 SALVAGE_1=SELECT ?,`status_id` - 1 AS `status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` ASC LIMIT 0,1
@@ -112,9 +117,11 @@ SALVAGE_9=UPDATE `Bind` SET `flag` = ? WHERE `status_id` = ? AND ((? IS NOT NULL
 SALVAGE_10=SELECT * FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 SALVAGE_11=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_at`,`structure`,`flag`) VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `structure` = VALUES(`structure`),`flag` = `flag` | ?
 SALVAGE_12=SELECT `flag` FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
+SALVAGE_13=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,3
+#SALVAGE_14=SELECT ?,`status_id` - 1 AS `status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` ASC LIMIT 0,1
 
-INDEX_0=INSERT `Token` (`user_id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE `ctime` = CURRENT_TIMESTAMP
-INDEX_1=SELECT DISTINCT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` RIGHT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referring_screen_name` = ? AND `Bind`.`referred_hash` = ? ORDER BY `Tweet`.`created_at` DESC
+INDEX_0=INSERT `Token` (`user_id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`,`ctime`) VALUES(?,?,?,?,CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE `ACCESS_TOKEN` = ?,`ACCESS_TOKEN_SECRET` = ?
+INDEX_1=SELECT DISTINCT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` RIGHT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE (`Bind`.`referring_screen_name` = ? OR `Bind`.`referring_screen_name` = ?) AND `Bind`.`referred_hash` LIKE ? AND `Tweet`.`flag` & ? = ? AND `Tweet`.`flag` & ? = 0 ORDER BY `Tweet`.`created_at` DESC
 SHOW_0=SELECT * FROM `Queue` WHERE `user_id` = ? OR `screen_name` = ? ORDER BY `ctime` DESC LIMIT 0,48
 SHOW_1=SELECT COUNT(*) FROM `Queue` WHERE `user_id` = ? OR `screen_name` = ? ORDER BY `ctime` DESC LIMIT 0,48
 SHOW_2=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referring_screen_name` ORDER BY `i` DESC LIMIT 0,8
@@ -234,6 +241,15 @@ sub encode_MySQLTime
 	return(DateTime::Format::MySQL->format_datetime(encode_DateTime(shift())));
 }
 
+sub figures
+{
+	my($label) = @_;
+
+	$B->{DBT_METHOD_6}->execute($label,$label);
+
+	return();
+}
+
 if(defined($ENV{GATEWAY_INTERFACE})){
 	BlackCurtain::Ignorance->new(
 		[
@@ -241,6 +257,7 @@ if(defined($ENV{GATEWAY_INTERFACE})){
 			[qr/^\/?$/,undef,\&cb_index],
 			[qr/^(\/(\w+))\/c\/?$/,undef,\&cb_conf],
 			[qr/^(\/(\w+)(?:\.([abd-z]+))?(?:\/([a-z]+))?(?:\/(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?(\-)?(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?)?)(?:\/(\d+))?\/?$/,16,\&cb_show],
+			[qr/./,undef,sub{$SES{HTTP_REFERER} = $ENV{REQUEST_URI}}],
 		],
 		CGI::Session =>["driver:memcached",undef,{Memcached =>$B->{Cache::Memcached}}],
 		Text::Xslate =>[path =>[split(/ /o,$C->{_}->{TEMPLATE})],cache_dir =>$C->{_}->{CACHE_DIR},module =>[qw(Text::Xslate::Bridge::Star Calendar::Simple URI::Escape)]],
@@ -445,6 +462,30 @@ given(shift(@ARGV)){
 			printf("Converted %d, revision %d to 4.\n",@{$r}{qw(status_id revision)});
 		}
 	}
+	when("-u5"){
+		while($B->{DBT_CLI_R5_0}->execute() != 0){
+			my $r = unpack_structure($B->{DBT_CLI_R5_0}->fetchrow_hashref());
+
+			if(my @urls = grep{!defined($_->{expanded_url})}(@{$r->{structure}->{twitter}->{entities}->{urls}},@{$r->{structure}->{twitter}->{entities}->{media}})){
+				for(@urls){
+					printf("Need expand %s.\n",$_);
+				}
+				if(!&r3_processer(@{$r}{qw(structure flag)})){
+					die($r->{status_id});
+				}
+				pack_structure($r);
+				if($B->{DBT_CLI_R5_1}->execute(@{$r}{qw(text structure status_id)}) == 0){
+					die($r->{status_id});
+				}
+				printf("Converted %d, revision %d to 5.\n",@{$r}{qw(status_id revision)});
+			}else{
+				if($B->{DBT_CLI_R5_2}->execute(@{$r}{qw(status_id)}) == 0){
+					die($r->{status_id});
+				}
+				printf("Skip %d, revision %d to 5.\n",@{$r}{qw(status_id revision)});
+			}
+		}
+	}
 	when(""){
 	}
 	default{
@@ -530,7 +571,7 @@ sub salvage
 				$i = $axis ? 2 : 3;
 			}
 			when(F_RETWEETED){
-				$i = $axis ? 0 : 1;
+				$i = $axis ? 13 : 1;
 			}
 			when(F_FAVORITES){
 				$i = $axis ? 4 : 5;
@@ -542,7 +583,7 @@ sub salvage
 		if($B->{DBT_SALVAGE_.$i}->execute($g,$user_id,$flag,$flag) == 0){
 			return();
 		}
-		return($B->{DBT_SALVAGE_.$i}->fetchrow_array());
+		return(@{$B->{DBT_SALVAGE_.$i}->fetchall_arrayref()->[-1]});
 	}
 
 	my $q = shift();
@@ -923,45 +964,66 @@ sub r3_processer
 	$structure->{youtube} = [];
 
 	for(@{$structure->{twittotter}->{entities}->{urls}},@{$structure->{twittotter}->{entities}->{media}}){
-		if(defined($_->{expanded_url})){
-			my($code,undef,undef,undef) = $B->{BlackCurtain::Fragility}->spider($_->{expanded_url},"none");
-			if($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/bgm-fes\.jp\//io){
-				# http://bgm-fes.jp/
-				# 正常なHTMLを常に HTTP/1.1 503 Service Unavailable で応答してくる糞サイト、死ぬべき
-				$code = 200;
-			}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.toranoana\.jp\//io){
-				# http://www.toranoana.jp/*
-				# 年齢認証で403を返す、アホ？
-				$code = -1;
-			}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/lockerz.com\//io){
-				# http://lockerz.com/s/180622748/*
-				# すぐ500吐くゴミ鯖
-			}
-			if($code == 200){
-				$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
-				$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
-			}elsif($code == 401){
-				$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
-				$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
-				warn("Failed spider ".$_->{expanded_url}.", returned ".$code);
-			}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/twitter.com\/.+?\/photo\//io){
-				$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
-				$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
-				warn("Failed spider ".$_->{expanded_url}.", returned ".$code);
-			}elsif($code == 404){
-				$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
-				$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
-				warn("Failed spider ".$_->{expanded_url}.", returned ".$code);
-			}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->{_msg} =~ /connect: Connection timed out/io){
-				warn("Failed spider ".$_->{expanded_url}.", returned ".$code.", Bullshit server.");
-			}elsif($code == -1){
-				$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
-				$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
-				warn("Failed spider ".$_->{expanded_url}.", returned ".$code);
-			}else{
-				warn("Failed spider ".$_->{expanded_url}.", returned ".$code);
-				return();
-			}
+		$_->{expanded_url} //= $_->{url};
+
+		my($code,undef,undef,undef) = $B->{BlackCurtain::Fragility}->spider($_->{expanded_url},"none");
+		if($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/bgm-fes\.jp\//io){
+			# http://bgm-fes.jp/
+			# 正常なHTMLを常に HTTP/1.1 503 Service Unavailable で応答してくる糞サイト、死ぬべき
+			$code = -1;
+		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.toranoana\.jp\//io){
+			# http://www.toranoana.jp/*
+			# 年齢認証で403を返す、アホ？
+			$code = -1;
+		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/lockerz.com\//io){
+			# http://lockerz.com/*
+			# すぐ500吐くゴミ鯖
+			$code = -1;
+		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/hatsukari\.2ch\.at\//io){
+			# http://hatsukari.2ch.at/*
+			# 常に500のゴミ鯖、だがLWP/UAのConnection Timeoutでは？
+			$code = -1;
+		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/\/112.78.197.156\//io){
+			# http:///112.78.197.156/*
+			# http://volac.net/aup/img/の404からLocation: http:///112.78.197.156/aflink/link.cgi?page=a404で302のクズ、"/"が3つある
+			$code = -2;
+		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/twitter.com\/.+?\/photo\//io){
+			# 非公開アカウントの画像は常に403
+			$code = -1;
+		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.youtube\.com\/watch/io){
+			# 削除された動画は常に403
+			$code = -1;
+		}
+		if($code == 200){
+			$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
+			$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+		}elsif($code == 401){
+			$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
+			$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+			warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
+		}elsif($code == 404){
+			$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
+			$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+			warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
+		}elsif($code == 410){
+			$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
+			$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+			warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
+		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->{_msg} =~ /connect: Connection timed out/io){
+			$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
+			$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+			warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code.", Bullshit server.");
+		}elsif($code == -1){
+			$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
+			$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+			warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
+		}elsif($code == -2){
+			#$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
+			$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+			warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
+		}else{
+			warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
+			return();
 		}
 	}
 
@@ -1021,6 +1083,10 @@ sub r3_processer
 		my($code,undef,$r,undef) = $B->{BlackCurtain::Fragility}->spider(sprintf("http://gdata.youtube.com/feeds/api/videos/%s",$1),"xml");
 		if($code == 200){
 			push(@{$structure->{youtube}},$r);
+		}elsif($code == 400){
+			warn("Failed spider ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
+		}elsif($code == 403){
+			warn("Failed spider ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
 		}elsif($code == 404){
 			warn("Failed spider ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
 		}else{
@@ -1053,6 +1119,13 @@ sub cb_prepare
 	my $g = shift();
 	my($location,$screen_name,$issue) = @{$m};
 
+	if(defined($ENV{GATEWAY_INTERFACE})){
+		figures("pv");
+		if(!$SES{access}++){
+			figures("uu");
+		}
+	}
+
 	if($SES{ACCESS_TOKEN} && $SES{ACCESS_TOKEN_SECRET}){
 		$B->{Net::Twitter} = Net::Twitter->new(
 			traits =>[qw(API::REST API::Search OAuth WrapError RetryOnError)],
@@ -1083,7 +1156,7 @@ sub cb_index
 {
 	if(!defined($GET{op})){
 		my $r;
-		my $sign = join(".",$C->{_}->{CACHE_PREFIX},"index");
+		my $sign = join(".",$C->{_}->{CACHE_PREFIX},$GET{l});
 		if(!defined($r = $B->{Cache::Memcached}->get($sign))){
 			$r = {
 				id =>undef,
@@ -1096,11 +1169,18 @@ sub cb_index
 				profile_sidebar_fill_color =>"DDEEF6",
 				profile_text_color =>"'333333'",
 				screen_name =>undef,
+				status =>[],
 			};
-			if($B->{DBT_INDEX_1}->execute("xmms","twittotter") == 0){
+			if($GET{l} =~ /^(info|history)$/io){
+				my $hash = {
+					info =>"twittotter%",
+					history =>"twittotter_history",
+				}->{$GET{l}};
+				if($B->{DBT_INDEX_1}->execute(qw(el1n xmms),$hash,F_REGULAR | F_TWEETS,F_REGULAR | F_TWEETS,F_RETWEETS) == 0){
+				}
+				map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_INDEX_1}->fetchall_arrayref({})};
+				$B->{Cache::Memcached}->set($sign,$r,$C->{Cache}->{DEFAULT_EXPIRE});
 			}
-			map{$_ = prepare_structure($_)}@{$r->{status} = $B->{DBT_INDEX_1}->fetchall_arrayref({})};
-			$B->{Cache::Memcached}->set($sign,$r,$C->{Cache}->{DEFAULT_EXPIRE});
 		}
 
 		return("Text::Xslate",$r // {},file =>"core.Xslate");
@@ -1109,7 +1189,7 @@ sub cb_index
 		$B->{Net::Twitter}->request_token_secret($SES{REQUEST_TOKEN_SECRET});
 		@SES{qw(ACCESS_TOKEN ACCESS_TOKEN_SECRET user_id screen_name)} = $B->{Net::Twitter}->request_access_token(token =>$GET{oauth_token},verifier =>$GET{oauth_verifier});
 		if($SES{user_id} > 0){
-			if($B->{DBT_INDEX_0}->execute(@SES{qw(user_id screen_name ACCESS_TOKEN ACCESS_TOKEN_SECRET)}) == 0){
+			if($B->{DBT_INDEX_0}->execute(@SES{qw(user_id screen_name ACCESS_TOKEN ACCESS_TOKEN_SECRET ACCESS_TOKEN ACCESS_TOKEN_SECRET)}) == 0){
 				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
 			}elsif(!&new_queue($SES{user_id},$SES{screen_name},"SALVAGE.TIMELINE",I_PRIORITY_HIGH,0,F_QUEUE|F_TWEETS)){
 				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
@@ -1157,11 +1237,11 @@ sub cb_conf
 	my $g = shift();
 	my($screen_name) = @{$m};
 
-	if($GET{v}){
-		$SES{v} = $SES{v} ? 0 : 1;
+	if($GET{v} > 0){
+		$SES{v} ^= 1 << ($GET{v} - 1)
 	}
 
-	return("jump",$ENV{HTTP_REFERER});
+	return("jump",$ENV{HTTP_REFERER} // $SES{HTTP_REFERER} // "/");
 }
 
 sub cb_show
@@ -1236,17 +1316,19 @@ sub cb_show
 		for(@{$structure->{entities}->{media}},@{$structure->{entities}->{urls}}){
 			if(defined($_->{expanded_url})){
 				if($_->{expanded_url} =~ /^http:\/\/twitpic\.com\/([0-9A-Za-z_]+)$/io){
-					my @g = @{(grep{$_->{short_id} == $1}@{$g->{structure}->{twitpic}})[0]}{qw(id type)};
-					$_->{media_url} = sprintf("http://s1-01.twitpicproxy.com/photos/full/%s.%s",@g);
-					$_->{thumb_url} = sprintf("http://s1-01.twitpicproxy.com/photos/thumb/%s.%s",@g);
-					push(@{$structure->{entities}->{media}},$_);
+					my @g = @{(grep{$_->{short_id} == $1}@{$g->{structure}->{twitpic}})[0] // {}}{qw(id type)};
+					if($g[0]){
+						$_->{media_url} = sprintf("http://s1-01.twitpicproxy.com/photos/full/%s.%s",@g);
+						$_->{thumb_url} = sprintf("http://s1-01.twitpicproxy.com/photos/thumb/%s.%s",@g);
+						push(@{$structure->{entities}->{media}},$_);
+					}
 				}elsif($_->{expanded_url} =~ /^(http:\/\/yfrog\.com\/[0-9A-Za-z_]+)$/io){
-					my @g = @{(grep{$_->{links}->{yfrog_link} == $1}@{$g->{structure}->{yfrog}})[0]->{links}}{qw(image_link yfrog_thumb)};
+					my @g = @{(grep{$_->{links}->{yfrog_link} == $1}@{$g->{structure}->{yfrog}})[0]->{links} // {}}{qw(image_link yfrog_thumb)};
 					$_->{media_url} = shift(@g);
 					$_->{thumb_url} = shift(@g);
 					push(@{$structure->{entities}->{media}},$_);
 				}elsif($_->{expanded_url} =~ /^(http:\/\/www\.flickr\.com\/photos\/.+?)$/io){
-					my @g = @{(grep{$_->{photo}->{urls}->{url}->{content} == $1}@{$g->{structure}->{flickr}})[0]->{photo}}{qw(farm server id secret)};
+					my @g = @{(grep{$_->{photo}->{urls}->{url}->{content} == $1}@{$g->{structure}->{flickr}})[0]->{photo} // {}}{qw(farm server id secret)};
 					$_->{media_url} = sprintf("http://farm%s.staticflickr.com/%s/%s_%s_b.jpg",@g);
 					$_->{thumb_url} = sprintf("http://farm%s.staticflickr.com/%s/%s_%s_t.jpg",@g);
 					push(@{$structure->{entities}->{media}},$_);
@@ -1310,7 +1392,7 @@ sub cb_show
 			push(@{$r->{queue}},($B->{DBT_SEARCH_0}->fetchrow_array())[0]);
 			$B->{Cache::Memcached}->set($sign.$clause,$r->{queue},$C->{Cache}->{QUEUE_EXPIRE});
 		}
-	}elsif(!$r->{IS_STATIC} || !defined($r->{status} = $B->{Cache::Memcached}->get($sign.$clause))){
+	}elsif(!$BORROW{IS_STATIC} || !defined($r->{status} = $B->{Cache::Memcached}->get($sign.$clause))){
 		my @where_time;
 		my @where_base;
 		my @where_char;
@@ -1362,14 +1444,24 @@ sub cb_show
 				push(@bind,($user_id,$screen_name,$flag,$flag)[0..$l - 1]);
 			}
 		}
-		if($GET{e} || defined($GET{egrep})){
+		if($GET{e} == 1 && (length($GET{egrep}) || length($GET{grep}))){
 			push(@where_char,$C->{MySQL}->{SEARCH_6_NP});
 			push(@bind,$GET{egrep} // $GET{grep});
-		}else{
+		}elsif($GET{e} == 0 && (length($GET{grep}))){
 			for(split(/\s+/o,$GET{grep})){
 				push(@where_char,$C->{MySQL}->{SEARCH_5_NP});
 				push(@bind,"%".$_."%");
 			}
+		}
+		if($GET{o} =~ /URLONLY/io){
+			push(@where_char,$C->{MySQL}->{SEARCH_6_NP});
+			push(@bind,q/http:\/\//);
+		}elsif($GET{o} =~ /IMGONLY/io){
+			push(@where_char,$C->{MySQL}->{SEARCH_6_NP});
+			push(@bind,q/(\\.(bmp|gif|jpe?g|png)|http:\/\/(twitpic|yfrog.com|www.flickr.com|twitter.com\/[^[:space:]]+\/photo\/))/);
+		}elsif($GET{o} =~ /IMGONLY/io){
+			push(@where_char,$C->{MySQL}->{SEARCH_6_NP});
+			push(@bind,q/(http:\/\/(www.youtube.com|www.ustream.tv|(www|live).nicovideo.jp))/);
 		}
 
 		my @embed = (
@@ -1388,7 +1480,7 @@ sub cb_show
 		$B->{DBT_SEARCH_0}->execute();
 		push(@{$r->{status}},($B->{DBT_SEARCH_0}->fetchrow_array())[0]);
 
-		if($r->{IS_STATIC}){
+		if($BORROW{IS_STATIC} && $#{$r->{status}} > 0){
 			$B->{Cache::Memcached}->set($sign.$clause,$r->{status},$C->{Cache}->{STATIC_STATUS_EXPIRE});
 		}
 	}
