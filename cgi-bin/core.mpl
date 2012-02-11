@@ -1,1 +1,1 @@
-core.cgi
+core.pl

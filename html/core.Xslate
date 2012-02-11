@@ -186,6 +186,13 @@ a:hover,a:active {
 	margin:0px 0px 0px 24px;
 	padding:0px 0px 0px 0px;
 }
+.main .timeline .timeline_date {
+	margin:8px 24px 2px 8px;
+	padding:2px 2px 2px 8px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#<:$profile_sidebar_fill_color:>;
+	font-size:<:FONT_SIZE - 1:>pt;
+}
 .main .timeline .timeline_head {
 	margin:2px 8px 2px 8px;
 :#	padding:0px 0px 0px 0px;
@@ -345,7 +352,28 @@ a:hover,a:active {
 				</tr>
 				:}
 			</table>
-		:}elsif !$BORROW.IS_SEARCH && $MATCH[3] == "j" {
+		:}elsif !$BORROW.IS_SEARCH && $MATCH[3] == "n" {
+			<table class="queue">
+				<tr>
+					<th colspan="2">基本情報</th>
+				</tr>
+				<tr>
+					<td>Twitter登録日</td>
+					<td><:$created_at:></td>
+				</tr>
+				<tr>
+					<td>ツイート総数</td>
+					<td><:$statuses_count:></td>
+				</tr>
+				<tr>
+					<td>フォローしている</td>
+					<td><:$friends_count:></td>
+				</tr>
+				<tr>
+					<td>フォローされている</td>
+					<td><:$followers_count:></td>
+				</tr>
+			</table>
 		:}else{
 		:if !$BORROW.IS_SHOW && $GET.l == nil {
 		<div class="search">
@@ -395,21 +423,21 @@ a:hover,a:active {
 							<select name="y-">
 								<option value="">*</option>
 								:for [2006..$BORROW.y] -> $i {
-								<option value=""<:$MATCH[4] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								<option value="<:$i:>"<:$MATCH[4] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
 								:}
 							</select>
 							-
 							<select name="m-">
 								<option value="">*</option>
 								:for [1..12] -> $i {
-								<option value=""<:$MATCH[5] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								<option value="<:$i:>"<:$MATCH[5] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
 								:}
 							</select>
 							-
 							<select name="d-">
 								<option value="">*</option>
 								:for [1..31] -> $i {
-								<option value=""<:$MATCH[6] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								<option value="<:$i:>"<:$MATCH[6] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
 								:}
 							</select>
 						</td>
@@ -426,21 +454,21 @@ a:hover,a:active {
 							<select name="-y">
 								<option value="">*</option>
 								:for [2006..$BORROW.y] -> $i {
-								<option value=""<:$MATCH[8] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								<option value="<:$i:>"<:$MATCH[8] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
 								:}
 							</select>
 							-
 							<select name="-m">
 								<option value="">*</option>
 								:for [1..12] -> $i {
-								<option value=""<:$MATCH[9] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								<option value="<:$i:>"<:$MATCH[9] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
 								:}
 							</select>
 							-
 							<select name="-d">
 								<option value="">*</option>
 								:for [1..31] -> $i {
-								<option value=""<:$MATCH[10] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								<option value="<:$i:>"<:$MATCH[10] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
 								:}
 							</select>
 						</td>
@@ -486,23 +514,27 @@ a:hover,a:active {
 			:}
 		:if $BORROW.IS_SHOW || $GET.l != nil {
 		<div class="timeline">
-				:for $status -> $status {
+				:for $status -> $e {
+				:if $~e == 0 || $e.created_at_splited.d != $status[$~e - 1].created_at_splited.d {
+:#				<div class="timeline_date"><a href="/<:$screen_name:>/<:$MATCH[3]:>/<:$e.created_at_splited.y:>-<:$e.created_at_splited.m:>-<:$e.created_at_splited.d:>"><:$e.created_at_splited.y:>-<:$e.created_at_splited.m:>-<:$e.created_at_splited.d:></a></div>
+				<div class="timeline_date"><:$e.created_at_splited.y:>-<:$e.created_at_splited.m:>-<:$e.created_at_splited.d:></div>
+				:}
 				:if $SES.v +& 2 {
-				<img class="cram icon" src="<:$status.user.profile_image_url_https:>" alt="<:$status.user.profile_image_url_https:>">
+				<img class="cram icon" src="<:$e.user.profile_image_url_https:>" alt="<:$e.user.profile_image_url_https:>">
 				:}
 				:if $SES.v +& 1 {
-				:for $status.entities.media -> $media {
+				:for $e.entities.media -> $media {
 				<a href="<:$media.media_url:>"><img class="pile media" src="<:$media.thumb_url:>" alt="<:$media.media_url:>"></a>
 				:}
 				:}
 				<div class="timeline_head">
-					<a href="https://twitter.com/#!/<:$status.user.screen_name:>" target="_blank"><span class="screen_name"><:$status.user.screen_name:></span></a>
-					<span class="name"><:$status.user.name:></span>
-					<span class="created_at"><:$status.created_at_formatted:></span>
-					<a href="https://twitter.com/#!/<:$status.user.screen_name:>/status/<:$status.id:>" target="_blank"><span class="id">#<:$status.id:></span></a>
+					<a href="https://twitter.com/#!/<:$e.user.screen_name:>" target="_blank"><span class="screen_name"><:$e.user.screen_name:></span></a>
+					<span class="name"><:$e.user.name:></span>
+					<span class="created_at"><:$e.created_at_formatted:></span>
+					<a href="https://twitter.com/#!/<:$e.user.screen_name:>/status/<:$e.id:>" target="_blank"><span class="id">#<:$e.id:></span></a>
 				</div>
-				<div class="timeline_body<:$SES.v +& 1 && $status.entities.media.size() > 0 ? " withmedia" : "":>">
-					<span class="text"><:$status.text|raw:></span>
+				<div class="timeline_body<:$SES.v +& 1 && $e.entities.media.size() > 0 ? " withmedia" : "":>">
+					<span class="text"><:$e.text|raw:></span>
 				</div>
 				:}
 		</div>

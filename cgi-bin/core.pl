@@ -43,11 +43,14 @@ use constant F_FAVORITED =>1 << 16;
 use constant F_SYNCHRONIZED =>1 << 17;
 use constant F_TIMELINE =>1 << 18;
 use constant F_HASH =>1 << 19;
-use constant F_API_MASK =>F_TWEETS|F_REPLIES|F_FAVORITES|F_RETWEETED|F_TIMELINE;
-use constant F_TYPE_MASK =>F_API_MASK|F_RETWEETS|F_QUOTETWEETS|F_REPLYTO|F_QUOTETWEETED|F_FAVORITED;
+use constant F_IMPORT_TWILOG =>1 << 33;
+use constant F_SURELY_MASK =>F_TWEETS|F_REPLIES|F_FAVORITES|F_RETWEETED|F_TIMELINE;
+use constant F_IMPORT_MASK =>F_SURELY_MASK|F_IMPORT_TWILOG;
+use constant F_TYPE_MASK =>F_SURELY_MASK|F_RETWEETS|F_QUOTETWEETS|F_REPLYTO|F_QUOTETWEETED|F_FAVORITED;
 use constant I_PRIORITY_LOW =>1;
 use constant I_PRIORITY_MIDIUM =>2;
 use constant I_PRIORITY_HIGH =>3;
+require("libTwilog.pl");
 
 BEGIN
 {
@@ -309,19 +312,18 @@ given(shift(@ARGV)){
 				#&new_queue($user_id,$screen_name,"UPDATE.MENTION",I_PRIORITY_HIGH,0,F_REPLIES);
 				#&new_queue($user_id,$screen_name,"UPDATE.FAVORITE",I_PRIORITY_HIGH,0,F_FAVORITES);
 				#&new_queue($user_id,$screen_name,"UPDATE.RETWEETED",I_PRIORITY_HIGH,0,F_RETWEETED);
-				&new_queue($user_id,$screen_name,"UPDATE.TIMELINE.ALL",I_PRIORITY_LOW,0,F_TIMELINE);
+				#&new_queue($user_id,$screen_name,"UPDATE.TIMELINE.ALL",I_PRIORITY_LOW,0,F_TIMELINE);
 				#&new_queue($user_id,$screen_name,"COMPARE.TIMELINE",I_PRIORITY_HIGH,0,F_TWEETS);
 				#&new_queue($user_id,$screen_name,"COMPARE.MENTION",I_PRIORITY_HIGH,0,F_REPLIES);
 				#&new_queue($user_id,$screen_name,"COMPARE.RETWEETED",I_PRIORITY_HIGH,0,F_RETWEETED);
 				#&new_queue($user_id,$screen_name,"COMPARE.FAVORITE",I_PRIORITY_HIGH,0,F_FAVORITES);
 				#&new_queue($user_id,$screen_name,"NULL.TEST",I_PRIORITY_HIGH,0,0);
+				&new_queue($user_id,$screen_name,"IMPORT.TWILOG",I_PRIORITY_HIGH,0,F_TWEETS | F_IMPORT_TWILOG);
 			}
 			return($user_id);
 		}
 
 		printf("%s() : %d\n",$_,&ini_queue(@ARGV));
-	}
-	when("-ql"){
 	}
 	when("-qe"){
 		sub mod_queue
@@ -341,7 +343,7 @@ given(shift(@ARGV)){
 		}
 		if($B->{DBT_CLI_QE_3}->execute() == 0){
 			#return();
-			exit(0);
+			exit(1);
 		}
 		my $r = $B->{DBT_CLI_QE_3}->fetchrow_hashref();
 
@@ -358,33 +360,98 @@ given(shift(@ARGV)){
 		)){
 			die();
 		}
-		if($r->{order} =~ /^(NULL)/io){
-		}elsif($r->{order} =~ /^(UPDATE|SALVAGE|COMPARE)/io){
-			$i = &salvage(
-				[$r->{screen_name}],
-				[undef,$r->{screen_name}],
-				{
-					user_id =>$r->{user_id},
-					flag =>$r->{flag} & F_API_MASK,
-					axis =>{UPDATE =>1,SALVAGE =>-1,COMPARE =>-1}->{$1},
-				},
-			);
-		}
+		given($r->{order}){
+			when(/^NULL/o){
+			}
+			when(/^UPDATE/o){
+				$i = &salvage(
+					[$r->{screen_name}],
+					[undef,$r->{screen_name}],
+					{
+						user_id =>$r->{user_id},
+						flag =>$r->{flag} & F_IMPORT_MASK,
+						axis =>1,
+					},
+				);
 
-		if($r->{order} =~ /^(UPDATE)/io){
-			$r->{priority} = I_PRIORITY_LOW;
-			$r->{atime} = 1800;
-			&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
-			&new_queue(@{$r}{qw(user_id screen_name order priority atime flag)});
-		}elsif($i != 0){
-			$r->{priority} = I_PRIORITY_MIDIUM;
-			$r->{atime} = 600;
-			&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
-			&new_queue(@{$r}{qw(user_id screen_name order priority atime flag)});
-		}else{
-			&mod_queue($r->{id},($r->{flag} & ~F_STATE) | F_FINISH);
-		}
+				@{$r}{qw(priority atime)} = (I_PRIORITY_LOW,1800);
+				&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
+				&new_queue(@{$r}{qw(user_id screen_name order priority atime flag)});
+			}
+			when(/^SALVAGE/o){
+				$i = &salvage(
+					[$r->{screen_name}],
+					[undef,$r->{screen_name}],
+					{
+						user_id =>$r->{user_id},
+						flag =>$r->{flag} & F_IMPORT_MASK,
+						axis =>-1,
+					},
+				);
 
+				if($i > 0){
+					@{$r}{qw(priority atime)} = (I_PRIORITY_MIDIUM,1200);
+					&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
+					&new_queue(@{$r}{qw(user_id screen_name order priority atime flag)});
+				}elsif($i == 0){
+					&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
+				}else{
+					@{$r}{qw(priority atime)} = (I_PRIORITY_MIDIUM,600);
+					&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
+					&new_queue(@{$r}{qw(user_id screen_name order priority atime flag)});
+				}
+			}
+			when(/^COMPARE/o){
+				$i = &salvage(
+					[$r->{screen_name}],
+					[undef,$r->{screen_name}],
+					{
+						user_id =>$r->{user_id},
+						flag =>$r->{flag} & F_IMPORT_MASK,
+						axis =>-1,
+					},
+				);
+
+				if($i > 0){
+					@{$r}{qw(priority atime)} = (I_PRIORITY_MIDIUM,600);
+					&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
+					&new_queue(@{$r}{qw(user_id screen_name order priority atime flag)});
+				}elsif($i == 0){
+					&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
+				}else{
+					@{$r}{qw(priority atime)} = (I_PRIORITY_MIDIUM,600);
+					&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
+					&new_queue(@{$r}{qw(user_id screen_name order priority atime flag)});
+				}
+			}
+			when(/^IMPORT\.TWILOG/o){
+				if(my $status = &parseTwilogXML($r->{screen_name}.".xml.gz")){
+					$i = &salvage(
+						[$r->{screen_name}],
+						[undef,$r->{screen_name}],
+						{
+							user_id =>$r->{user_id},
+							flag =>$r->{flag} & F_IMPORT_MASK,
+							axis =>1,
+							status =>$status,
+						},
+					);
+	
+					if($i > 0){
+						&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
+					}elsif($i == 0){
+						&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
+					}else{
+						@{$r}{qw(priority atime)} = (I_PRIORITY_HIGH,1800);
+						&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
+						&new_queue(@{$r}{qw(user_id screen_name order priority atime flag)});
+					}
+				}
+			}
+			default{
+				die();
+			}
+		}
 		printf("[Queue#%d %s] %s's queue, returned %d.\n",@{$r}{qw(id order screen_name)},$i);
 	}
 	when("-sd"){
@@ -393,13 +460,6 @@ given(shift(@ARGV)){
 			die();
 		}
 		print Data::Dumper::Dumper(unpack_structure($B->{DBT_CLI_SD_0}->fetchrow_hashref()));
-	}
-	when("--twilog"){
-		for my $structure (keys(%{XMLin(shift(@ARGV))->{tweet}})){
-			if($B->{SALVAGE_10}->execute($structure) == 0){
-				print $structure."\n";
-			}
-		}
 	}
 	when("-u2"){
 		while($B->{DBT_CLI_R2_0}->execute() != 0){
@@ -563,7 +623,7 @@ sub salvage
 
 		my $g = $axis ? "since_id" : "max_id";
 		my $i;
-		given($flag & F_API_MASK){
+		given($flag & F_SURELY_MASK){
 			when(F_TWEETS){
 				$i = $axis ? 0 : 1;
 			}
@@ -597,7 +657,7 @@ sub salvage
 	$flag = $flag | F_SYNCHRONIZED;
 
 	my $r = [];
-	given($flag & F_API_MASK){
+	given($flag & F_IMPORT_MASK){
 		when(F_TWEETS){
 			my $status;
 			my $i = 1;
@@ -658,6 +718,9 @@ sub salvage
 				++$i;
 			}while($axis >= 0 && $#{$status} == 199);
 		}
+		when(F_TWEETS | F_IMPORT_TWILOG){
+			$r = $d->{status};
+		}
 		default{
 			warn("Unknown flag.");
 			return(-1);
@@ -669,10 +732,10 @@ sub salvage
 
 	for my $structure (@{$r}){
 		$structure->{retweeted_by} = [];
-		my $flag = $structure->{user}->{id} eq $user_id ? $flag | F_REGULAR : $flag;
+		my $flag = $flag & F_SURELY_MASK && $structure->{user}->{id} eq $user_id ? $flag | F_REGULAR : $flag;
 		my @flag;
 
-		given($flag & F_API_MASK){
+		given($flag & F_SURELY_MASK){
 			when(F_TWEETS){
 				if($structure->{text} =~ /^RT \@([0-9A-Za-z_]{1,15}):/o){
 					push(@flag,F_RETWEETS);
@@ -863,38 +926,47 @@ sub salvage
 			$flag |= $_;
 		}
 
-		my $inserted_flag = 0;
-		if($B->{DBT_SALVAGE_12}->execute($structure->{twitter}->{id}) != 0){
-			$inserted_flag = ($B->{DBT_SALVAGE_12}->fetchrow_array())[0] // 0;
+		if($B->{DBT_SALVAGE_10}->execute($structure->{twitter}->{id}) > 0){
+			my $structure_store = unpack_structure($B->{DBT_SALVAGE_10}->fetchrow_hashref())->{structure};
+			my $structure_clone = Clone::clone($structure);
+	
+			if($structure_store->{twitter}->{id} != $structure->{twitter}->{id}){
+				warn();
+				return(-1);
+			}
+
+			if($flag & F_REGULAR){
+				$structure = $structure_clone;
+				warn(sprintf("[STATUS#%d] based clone.",$structure->{twitter}->{id}));
+			}else{
+				$structure = $structure_store;
+				warn(sprintf("[STATUS#%d] based store.",$structure->{twitter}->{id}));
+			}
+			if($flag & F_RETWEETED){
+				$structure->{twitter}->{retweeted_by} = $structure_clone->{twitter}->{retweeted_by};
+				warn(sprintf("[STATUS#%d] F_RETWEETED.",$structure->{twitter}->{id}));
+			}else{
+				$structure->{twitter}->{retweeted_by} = $structure_store->{twitter}->{retweeted_by};
+				warn(sprintf("[STATUS#%d] F_RETWEETED.",$structure->{twitter}->{id}));
+			}
+			if($flag & F_IMPORT_TWILOG){
+				$structure->{twilog} = $structure_clone->{twilog};
+			}elsif(defined($structure_store->{twilog})){
+				$structure->{twilog} = $structure_store->{twilog};
+			}
 		}
-		if($flag & F_REGULAR && !($inserted_flag & F_RETWEETED)){
-			if($B->{DBT_SALVAGE_11}->execute(
-				$structure->{twitter}->{id},
-				$structure->{twitter}->{user}->{id},
-				$structure->{twitter}->{user}->{screen_name},
-				$structure->{twittotter}->{text_deployed},
-				encode_MySQLTime($structure->{twitter}->{created_at}),
-				gzip($structure),
-				$flag,
-				$flag,
-			) == 0){
-				warn(sprintf("MySQL DBT_SALVAGE_11 error."));
-				return(-1);
-			}
-		}else{
-			if($B->{DBT_SALVAGE_6}->execute(
-				$structure->{twitter}->{id},
-				$structure->{twitter}->{user}->{id},
-				$structure->{twitter}->{user}->{screen_name},
-				$structure->{twittotter}->{text_deployed},
-				encode_MySQLTime($structure->{twitter}->{created_at}),
-				gzip($structure),
-				$flag,
-				$flag,
-			) == 0){
-				warn(sprintf("MySQL DBT_SALVAGE_6 error."));
-				return(-1);
-			}
+		if($B->{DBT_SALVAGE_11}->execute(
+			$structure->{twitter}->{id},
+			$structure->{twitter}->{user}->{id},
+			$structure->{twitter}->{user}->{screen_name},
+			$structure->{twittotter}->{text_deployed},
+			encode_MySQLTime($structure->{twitter}->{created_at}),
+			gzip($structure),
+			$flag,
+			$flag,
+		) == 0){
+			warn(sprintf("MySQL DBT_SALVAGE_11 error."));
+			return(-1);
 		}
 	}
 
@@ -964,7 +1036,7 @@ sub r3_processer
 	$structure->{youtube} = [];
 
 	for(@{$structure->{twittotter}->{entities}->{urls}},@{$structure->{twittotter}->{entities}->{media}}){
-		$_->{expanded_url} //= $_->{url};
+		$_->{expanded_url} //= $_->{url} =~ /^[a-z]+:\/\//o ? $_->{url} : "http://".$_->{url};
 
 		my($code,undef,undef,undef) = $B->{BlackCurtain::Fragility}->spider($_->{expanded_url},"none");
 		if($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/bgm-fes\.jp\//io){
@@ -983,43 +1055,66 @@ sub r3_processer
 			# http://hatsukari.2ch.at/*
 			# 常に500のゴミ鯖、だがLWP/UAのConnection Timeoutでは？
 			$code = -1;
+		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/ux\.nu\//io){
+			# http://ux.nu/*
+			# URL短縮サービスが死んでどうすんだアホ
+			$code = -1;
 		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/\/112.78.197.156\//io){
 			# http:///112.78.197.156/*
 			# http://volac.net/aup/img/の404からLocation: http:///112.78.197.156/aflink/link.cgi?page=a404で302のクズ、"/"が3つある
 			$code = -2;
+		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.robotentertainment\.com\/games\/orcsmustdie/io){
+			# http://www.robotentertainment.com/games/orcsmustdie
+			# Fragility側の問題による403
+			$code = -1;
+		}elsif($code == 502 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/am6\.jp\//io){
+			# http://am6.jp/*
+			# 非携帯端末からのアクセスを拒否している？
+			$code = -1;
+		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.pfsense\.com\/packages\/config\//io){
+			# http://www.pfsense.com/packages/config/
+			# pfsenseのパッケージは別のところに移動している
+			$code = -1;
+		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/en\.expreview\.com\//io){
+			# http://en.expreview.com/*
+			# Fragility側の問題による403
+			$code = -1;
 		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/twitter.com\/.+?\/photo\//io){
 			# 非公開アカウントの画像は常に403
 			$code = -1;
 		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.youtube\.com\/watch/io){
 			# 削除された動画は常に403
 			$code = -1;
+		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/d\.hatena\.ne\.jp\//io){
+			# プライベートモードによる403
+			$code = -1;
 		}
 		if($code == 200){
 			$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
-			$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+			$structure->{twittotter}->{text_deployed} =~s/\Q$_->{url}\E/$_->{expanded_url}/g;
 		}elsif($code == 401){
 			$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
-			$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+			$structure->{twittotter}->{text_deployed} =~s/\Q$_->{url}\E/$_->{expanded_url}/g;
 			warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
 		}elsif($code == 404){
 			$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
-			$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+			$structure->{twittotter}->{text_deployed} =~s/\Q$_->{url}\E/$_->{expanded_url}/g;
 			warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
 		}elsif($code == 410){
 			$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
-			$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+			$structure->{twittotter}->{text_deployed} =~s/\Q$_->{url}\E/$_->{expanded_url}/g;
 			warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
 		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->{_msg} =~ /connect: Connection timed out/io){
 			$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
-			$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+			$structure->{twittotter}->{text_deployed} =~s/\Q$_->{url}\E/$_->{expanded_url}/g;
 			warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code.", Bullshit server.");
 		}elsif($code == -1){
 			$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
-			$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+			$structure->{twittotter}->{text_deployed} =~s/\Q$_->{url}\E/$_->{expanded_url}/g;
 			warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
 		}elsif($code == -2){
 			#$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
-			$structure->{twittotter}->{text_deployed} =~s/$_->{url}/$_->{expanded_url}/g;
+			$structure->{twittotter}->{text_deployed} =~s/\Q$_->{url}\E/$_->{expanded_url}/g;
 			warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
 		}else{
 			warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code);
@@ -1107,6 +1202,14 @@ sub r4_processer
 
 	my %b;
 	$structure->{retweeted_by} = [grep{$b{$_->{id}}++ == 0}@{$structure->{retweeted_by}}];
+
+	return(1);
+}
+
+sub r5_processer
+{
+	my $structure = shift();
+	my $flag = shift();
 
 	return(1);
 }
@@ -1268,8 +1371,8 @@ sub cb_show
 	my @time = localtime($time);
 	%BORROW = (
 		IS_SHOW =>1,
-		IS_STATIC =>length($clause) == 1 && $clause =~ /^[zjtmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) && !defined($g[3]) && !defined($g[4]) && $g[7] == 0 ? 1 : 0,
-		IS_SEARCH =>length($clause) == 1 && $clause =~ /^[zjtmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) ? 0 : 1,
+		IS_STATIC =>length($clause) == 1 && $clause =~ /^[jntmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) && !defined($g[3]) && !defined($g[4]) && $g[7] == 0 ? 1 : 0,
+		IS_SEARCH =>length($clause) == 1 && $clause =~ /^[jntmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) ? 0 : 1,
 
 		location =>$location,
 		u =>$time,
@@ -1360,27 +1463,24 @@ sub cb_show
 			$structure->{text} =~s/\@([0-9A-Za-z_]{1,15})(?![^<>]+>)(?![^<>]+<\/a>)/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>/g;
 		}
 
-		$structure->{created_at_formatted} = encode_DateTime($structure->{created_at})->strftime("%Y-%m-%d %H:%M");
+		my $dt = encode_DateTime($structure->{created_at});
+		$structure->{created_at_formatted} = $dt->strftime("%Y-%m-%d %H:%M");
+		$structure->{created_at_splited} = {
+			u =>$dt->epoch(),
+			s =>$dt->second(),
+			n =>$dt->minute(),
+			h =>$dt->hour(),
+			d =>$dt->day(),
+			m =>$dt->month(),
+			y =>$dt->year(),
+			w =>$dt->day_of_week(),
+		};
 
 		return($structure);
 	}
 
 	if($r->{protected} && $SES{id} != $r->{id}){
 	}elsif($clause eq "n"){
-		$r = {
-			id =>"",
-			name =>"",
-			profile_background_color =>"C0DEED",
-			profile_image_url =>"/img/twittotter.png",
-			profile_image_url_https =>"/img/twittotter.png",
-			profile_link_color =>"0084B4",
-			profile_sidebar_border_color =>"C0DEED",
-			profile_sidebar_fill_color =>"DDEEF6",
-			profile_text_color =>"'333333'",
-			profile_use_background_image =>"1",
-			protected =>1,
-			screen_name =>"",
-		};
 	}elsif($clause eq "j"){
 		if(!defined($r->{queue} = $B->{Cache::Memcached}->get($sign.$clause))){
 			if(!$B->{DBT_SHOW_0}->execute($user_id,$screen_name)){
@@ -1459,7 +1559,7 @@ sub cb_show
 		}elsif($GET{o} =~ /IMGONLY/io){
 			push(@where_char,$C->{MySQL}->{SEARCH_6_NP});
 			push(@bind,q/(\\.(bmp|gif|jpe?g|png)|http:\/\/(twitpic|yfrog.com|www.flickr.com|twitter.com\/[^[:space:]]+\/photo\/))/);
-		}elsif($GET{o} =~ /IMGONLY/io){
+		}elsif($GET{o} =~ /MOVONLY/io){
 			push(@where_char,$C->{MySQL}->{SEARCH_6_NP});
 			push(@bind,q/(http:\/\/(www.youtube.com|www.ustream.tv|(www|live).nicovideo.jp))/);
 		}
