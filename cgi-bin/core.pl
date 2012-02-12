@@ -4,6 +4,7 @@ use utf8;
 use lib qw(/usr/local/lib/perl);
 use vars qw($B $C);
 use List::Util qw(first max maxstr min minstr reduce shuffle sum);
+use List::MoreUtils qw(uniq);
 use Clone;
 use Encode qw(encode decode);
 use Compress::Zlib;
@@ -122,14 +123,14 @@ SALVAGE_11=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_a
 SALVAGE_12=SELECT `flag` FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 SALVAGE_13=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,3
 #SALVAGE_14=SELECT ?,`status_id` - 1 AS `status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` ASC LIMIT 0,1
+ANALYZE_0=SELECT DATE_FORMAT(`created_at`,'%Y-%m') as `created_at_ym`,COUNT(*) as `i` FROM `Tweet` WHERE `user_id` = ? OR `screen_name` = ? GROUP BY `created_at_ym` ORDER BY `created_at_ym` DESC
+ANALYZE_1=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referring_screen_name` ORDER BY `i` DESC LIMIT 0,20
+ANALYZE_2=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referred_screen_name` ORDER BY `i` DESC LIMIT 0,20
 
 INDEX_0=INSERT `Token` (`user_id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`,`ctime`) VALUES(?,?,?,?,CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE `ACCESS_TOKEN` = ?,`ACCESS_TOKEN_SECRET` = ?
 INDEX_1=SELECT DISTINCT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` RIGHT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE (`Bind`.`referring_screen_name` = ? OR `Bind`.`referring_screen_name` = ?) AND `Bind`.`referred_hash` LIKE ? AND `Tweet`.`flag` & ? = ? AND `Tweet`.`flag` & ? = 0 ORDER BY `Tweet`.`created_at` DESC
 SHOW_0=SELECT * FROM `Queue` WHERE `user_id` = ? OR `screen_name` = ? ORDER BY `ctime` DESC LIMIT 0,48
 SHOW_1=SELECT COUNT(*) FROM `Queue` WHERE `user_id` = ? OR `screen_name` = ? ORDER BY `ctime` DESC LIMIT 0,48
-SHOW_2=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referring_screen_name` ORDER BY `i` DESC LIMIT 0,8
-SHOW_3=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referred_screen_name` ORDER BY `i` DESC LIMIT 0,8
-SHOW_5=SELECT DATE_FORMAT(`created_at`,'%Y-%m') as `created_at_ym`,COUNT(*) as `i` FROM `Tweet` WHERE `user_id` = ? OR `screen_name` = ? GROUP BY `created_at_ym` ORDER BY `created_at_ym` DESC
 SEARCH_0=SELECT FOUND_ROWS()
 SEARCH_0_NP=SELECT SQL_CALC_FOUND_ROWS DISTINCT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE ({}) AND ({}) AND {} ORDER BY `Tweet`.`created_at` DESC LIMIT {},{}
 SEARCH_1_NP=(`Tweet`.`user_id` = ? OR `Tweet`.`screen_name` = ?)
@@ -152,6 +153,8 @@ SEARCH_17_NP=UNIX_TIMESTAMP(`Tweet`.`created_at`) >= UNIX_TIMESTAMP(?)
 SEARCH_18_NP=UNIX_TIMESTAMP(DATE(`Tweet`.`created_at`)) < UNIX_TIMESTAMP(DATE_ADD(?,INTERVAL 1 YEAR))
 SEARCH_19_NP=UNIX_TIMESTAMP(DATE(`Tweet`.`created_at`)) < UNIX_TIMESTAMP(DATE_ADD(?,INTERVAL 1 MONTH))
 SEARCH_20_NP=UNIX_TIMESTAMP(DATE(`Tweet`.`created_at`)) < UNIX_TIMESTAMP(DATE_ADD(?,INTERVAL 1 DAY))
+SEARCH_21_NP=(((`Bind`.`referring_user_id` = ? OR `Bind`.`referring_screen_name` = ?) AND (`Bind`.`referred_user_id` = ? OR `Bind`.`referred_screen_name` = ?)) AND `Bind`.`flag` & ? = ?)
+SEARCH_22_NP=(((`Bind`.`referred_user_id` = ? OR `Bind`.`referred_screen_name` = ?) AND (`Bind`.`referring_user_id` = ? OR `Bind`.`referring_screen_name` = ?)) AND `Bind`.`flag` & ? = ?)
 
 [Memcached]
 HOST=127.0.0.1:11211
@@ -258,8 +261,8 @@ if(defined($ENV{GATEWAY_INTERFACE})){
 		[
 			[qr/./,undef,\&cb_prepare],
 			[qr/^\/?$/,undef,\&cb_index],
-			[qr/^(\/(\w+))\/c\/?$/,undef,\&cb_conf],
-			[qr/^(\/(\w+)(?:\.([abd-z]+))?(?:\/([a-z]+))?(?:\/(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?(\-)?(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?)?)(?:\/(\d+))?\/?$/,16,\&cb_show],
+			[qr/^(\/([0-9A-Za-z_]{1,15}))\/c\/?$/,undef,\&cb_conf],
+			[qr/^(\/([0-9A-Za-z_]{1,15})(?:\.([abd-z]+))?(?:\/([a-z]+))?(?:\/([0-9A-Za-z_]{1,15}))?(?:\/(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?(\-)?(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?)?)(?:\/(\d+))?\/?$/,16,\&cb_show],
 			[qr/./,undef,sub{$SES{HTTP_REFERER} = $ENV{REQUEST_URI}}],
 		],
 		CGI::Session =>["driver:memcached",undef,{Memcached =>$B->{Cache::Memcached}}],
@@ -318,7 +321,7 @@ given(shift(@ARGV)){
 				#&new_queue($user_id,$screen_name,"COMPARE.RETWEETED",I_PRIORITY_HIGH,0,F_RETWEETED);
 				#&new_queue($user_id,$screen_name,"COMPARE.FAVORITE",I_PRIORITY_HIGH,0,F_FAVORITES);
 				#&new_queue($user_id,$screen_name,"NULL.TEST",I_PRIORITY_HIGH,0,0);
-				&new_queue($user_id,$screen_name,"IMPORT.TWILOG",I_PRIORITY_HIGH,0,F_TWEETS | F_IMPORT_TWILOG);
+				&new_queue($user_id,$screen_name,"ANALYZE",I_PRIORITY_LOW,0,0);
 			}
 			return($user_id);
 		}
@@ -447,6 +450,19 @@ given(shift(@ARGV)){
 						&new_queue(@{$r}{qw(user_id screen_name order priority atime flag)});
 					}
 				}
+			}
+			when(/^ANALYZE/o){
+				$i = &analyze(
+					[$r->{screen_name}],
+					[undef,$r->{screen_name}],
+					{
+						user_id =>$r->{user_id},
+					},
+				);
+
+				@{$r}{qw(priority atime)} = (I_PRIORITY_LOW,300);
+				&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
+				&new_queue(@{$r}{qw(user_id screen_name order priority atime flag)});
 			}
 			default{
 				die();
@@ -1214,6 +1230,44 @@ sub r5_processer
 	return(1);
 }
 
+sub analyze
+{
+	my $q = shift();
+	my $m = shift();
+	my $d = shift();
+	my $g = shift();
+	my($screen_name) = @{$q};
+	my($location,$screen_name,$issue) = @{$m};
+	my($user_id,$flag,$axis) = @{$d}{qw(user_id flag axis)};
+	$user_id //= user_id($screen_name);
+
+	#if($B->{DBT_ANALYZE_0}->execute($user_id,$screen_name)){
+	#	$r->{"archives"} = $B->{DBT_ANALYZE_0}->fetchall_arrayref({});
+	#}
+	if($B->{DBT_ANALYZE_1}->execute($user_id,$screen_name,F_REPLIES,F_REPLIES)){
+		$r->{"result_".F_REPLIES} = $B->{DBT_ANALYZE_1}->fetchall_arrayref({});
+	}
+	if($B->{DBT_ANALYZE_2}->execute($user_id,$screen_name,F_REPLYTO,F_REPLYTO)){
+		$r->{"result_".F_REPLYTO} = $B->{DBT_ANALYZE_2}->fetchall_arrayref({});
+	}
+	$r->{"result_".(F_REPLIES|F_REPLYTO)} = [sort{
+		$b->{"i_".(F_REPLIES|F_REPLYTO)} <=> $a->{"i_".(F_REPLIES|F_REPLYTO)}
+	}map{
+		my $t = {};
+		$t->{id} = undef;
+		$t->{screen_name} = $_;
+		$t->{"i_".F_REPLIES} = ((grep{$_->{referring_screen_name} eq $t->{screen_name}}@{$r->{"result_".F_REPLIES}})[0] // {i =>0})->{i};
+		$t->{"i_".F_REPLYTO} = ((grep{$_->{referred_screen_name} eq $t->{screen_name}}@{$r->{"result_".F_REPLYTO}})[0] // {i =>0})->{i};
+		$t->{"i_".(F_REPLIES|F_REPLYTO)} = $r->{"i_".F_REPLIES} + $r->{"i_".F_REPLYTO};
+		$t
+	}uniq(map{$_->{referring_screen_name}}@{$r->{"result_".F_REPLIES}},map{$_->{referred_screen_name}}@{$r->{"result_".F_REPLYTO}})];
+
+	my $sign = join(".",$C->{_}->{CACHE_PREFIX},$screen_name).".";
+	$B->{Cache::Memcached}->set($sign."analyze",$r,$C->{Cache}->{PROFILE_EXPIRE});
+
+	return(1);
+}
+
 sub cb_prepare
 {
 	my $q = shift();
@@ -1353,14 +1407,14 @@ sub cb_show
 	my $m = shift();
 	$m->[3] .= $GET{c};
 	$m->[3] ||= "t";
-	$m->[4] //= $GET{"y-"};
-	$m->[5] //= $GET{"m-"};
-	$m->[6] //= $GET{"d-"};
-	$m->[8] //= defined($m->[7]) ? undef : $GET{"-y"} || $m->[4];
-	$m->[9] //= defined($m->[7]) ? undef : $GET{"-m"} || $m->[5];
-	$m->[10] //= defined($m->[7]) ? undef : $GET{"-d"} || $m->[6];
-	$m->[7] //= $m->[3] =~ /s/o ? "-" : undef;
-	$m->[11] = $m->[11] < 1 ? 0 : $m->[11] - 1;
+	$m->[5] //= $GET{"y-"};
+	$m->[6] //= $GET{"m-"};
+	$m->[7] //= $GET{"d-"};
+	$m->[9] //= defined($m->[8]) ? undef : $GET{"-y"} || $m->[5];
+	$m->[10] //= defined($m->[8]) ? undef : $GET{"-m"} || $m->[6];
+	$m->[11] //= defined($m->[8]) ? undef : $GET{"-d"} || $m->[7];
+	$m->[8] //= $m->[3] =~ /s/o ? "-" : undef;
+	$m->[12] = $m->[12] < 1 ? 0 : $m->[12] - 1;
 	my $d = shift();
 	my $g = shift();
 	my($location,$screen_name,$issue,$clause,@g) = @{$m};
@@ -1371,8 +1425,8 @@ sub cb_show
 	my @time = localtime($time);
 	%BORROW = (
 		IS_SHOW =>1,
-		IS_STATIC =>length($clause) == 1 && $clause =~ /^[jntmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) && !defined($g[3]) && !defined($g[4]) && $g[7] == 0 ? 1 : 0,
-		IS_SEARCH =>length($clause) == 1 && $clause =~ /^[jntmrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) ? 0 : 1,
+		IS_STATIC =>length($clause) == 1 && $clause =~ /^[jotmnrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) && !defined($g[1]) && !defined($g[4]) && !defined($g[5]) && $g[8] == 0 ? 1 : 0,
+		IS_SEARCH =>length($clause) == 1 && $clause =~ /^[jotmnrequfa]$/o && !defined($GET{grep}) && !defined($GET{egrep}) && !defined($g[0]) && !defined($g[1]) ? 0 : 1,
 
 		location =>$location,
 		u =>$time,
@@ -1384,8 +1438,8 @@ sub cb_show
 		y =>$time[5] + 1900,
 		w =>$time[6],
 		cal =>{
-			m =>$m->[9] // $GET{"m-"} // ($m->[8] ? 12 : $time[4] + 1),
-			y =>$m->[8] // $GET{"y-"} // $time[5] + 1900,
+			m =>$m->[10] // $GET{"m-"} // ($m->[9] ? 12 : $time[4] + 1),
+			y =>$m->[9] // $GET{"y-"} // $time[5] + 1900,
 		},
 	);
 
@@ -1396,14 +1450,8 @@ sub cb_show
 			return(&cb_exception(undef,undef,undef,"ユーザ情報取得失敗"));
 		}
 
-		if($B->{DBT_SHOW_2}->execute($user_id,$screen_name,F_REPLIES,F_REPLIES)){
-			$r->{"count_".F_REPLIES} = $B->{DBT_SHOW_2}->fetchall_arrayref({});
-		}
-		if($B->{DBT_SHOW_3}->execute($user_id,$screen_name,F_REPLYTO,F_REPLYTO)){
-			$r->{"count_".F_REPLYTO} = $B->{DBT_SHOW_3}->fetchall_arrayref({});
-		}
-		if($B->{DBT_SHOW_5}->execute($user_id,$screen_name)){
-			$r->{"archives"} = $B->{DBT_SHOW_5}->fetchall_arrayref({});
+		if($B->{DBT_ANALYZE_0}->execute($user_id,$screen_name)){
+			$r->{"archives"} = $B->{DBT_ANALYZE_0}->fetchall_arrayref({});
 		}
 
 		$B->{Cache::Memcached}->set($sign."profile",$r,$C->{Cache}->{PROFILE_EXPIRE});
@@ -1480,7 +1528,10 @@ sub cb_show
 	}
 
 	if($r->{protected} && $SES{id} != $r->{id}){
-	}elsif($clause eq "n"){
+	}elsif($clause eq "o"){
+		if(!defined($r->{twittotter}->{analyze} = $B->{Cache::Memcached}->get($sign."analyze"))){
+			$r->{twittotter}->{message} = "";
+		}
 	}elsif($clause eq "j"){
 		if(!defined($r->{queue} = $B->{Cache::Memcached}->get($sign.$clause))){
 			if(!$B->{DBT_SHOW_0}->execute($user_id,$screen_name)){
@@ -1498,50 +1549,60 @@ sub cb_show
 		my @where_char;
 		my @bind;
 
-		if($g[0] > 0){
-			if(defined($g[3])){
+		if($g[1] > 0){
+			if(defined($g[4])){
 				push(@where_time,$C->{MySQL}->{SEARCH_17_NP});
-				push(@bind,join("-",$g[0],$g[1] || 1,$g[2] || 1));
+				push(@bind,join("-",$g[1],$g[2] || 1,$g[3] || 1));
 			}else{
-				for my $i (0..2){
+				for my $i (1..3){
 					if($g[$i] > 0){
-						push(@where_time,$C->{MySQL}->{SEARCH_.(7 + $i)._NP});
+						push(@where_time,$C->{MySQL}->{SEARCH_.(6 + $i)._NP});
 						push(@bind,$g[$i]);
 					}
 				}
 			}
 		}
-		if($g[4] > 0){
-			if(defined($g[3])){
-				if(defined($g[6])){
+		if($g[5] > 0){
+			if(defined($g[4])){
+				if(defined($g[7])){
 					push(@where_time,$C->{MySQL}->{SEARCH_20_NP});
-					push(@bind,join("-",$g[4],$g[5] || 1,$g[6] || 1));
-				}elsif(defined($g[5])){
+					push(@bind,join("-",$g[5],$g[6] || 1,$g[7] || 1));
+				}elsif(defined($g[6])){
 					push(@where_time,$C->{MySQL}->{SEARCH_19_NP});
-					push(@bind,join("-",$g[4],$g[5] || 1,$g[6] || 1));
+					push(@bind,join("-",$g[5],$g[6] || 1,$g[7] || 1));
 				}else{
 					push(@where_time,$C->{MySQL}->{SEARCH_18_NP});
-					push(@bind,join("-",$g[4],$g[5] || 1,$g[6] || 1));
+					push(@bind,join("-",$g[5],$g[6] || 1,$g[7] || 1));
 				}
 			}
 		}
-		for(qw(t m r e q u f a i)){
+		for(qw(t m n r e q u f a i)){
 			if($clause =~ /$_/){
-				my($i,$l,$flag) = @{{
-					t =>[1,2,F_TWEETS],
-					m =>[3,4,F_REPLIES],
-					_ =>[2,4,F_REPLYTO],
-					r =>[2,4,F_RETWEETS],
-					e =>[3,4,F_RETWEETED],
-					q =>[2,4,F_QUOTETWEETS],
-					u =>[3,4,F_QUOTETWEETED],
-					f =>[2,4,F_FAVORITES],
-					a =>[3,4,F_FAVORITES],
-					i =>[2,4,F_TIMELINE],
-				}->{$_}};
+				my($i,$index,$flag) = @{{
+					t =>[1,[0,1],F_TWEETS],
+					m =>[3,[0,1,4,5],F_REPLIES],
+					n =>[2,[0,1,4,5],F_REPLYTO],
+					r =>[2,[0,1,4,5],F_RETWEETS],
+					e =>[3,[0,1,4,5],F_RETWEETED],
+					q =>[2,[0,1,4,5],F_QUOTETWEETS],
+					u =>[3,[0,1,4,5],F_QUOTETWEETED],
+					f =>[2,[0,1,4,5],F_FAVORITES],
+					a =>[3,[0,1,4,5],F_FAVORITES],
+					i =>[2,[0,1,4,5],F_TIMELINE],
+					t_ =>[1,[0,1],F_TWEETS],
+					m_ =>[22,[0,1,2,3,4,5],F_REPLIES],
+					n_ =>[21,[0,1,2,3,4,5],F_REPLYTO],
+					r_ =>[2,[0,1,4,5],F_RETWEETS],
+					e_ =>[3,[0,1,4,5],F_RETWEETED],
+					q_ =>[2,[0,1,4,5],F_QUOTETWEETS],
+					u_ =>[3,[0,1,4,5],F_QUOTETWEETED],
+					f_ =>[2,[0,1,4,5],F_FAVORITES],
+					a_ =>[3,[0,1,4,5],F_FAVORITES],
+					i_ =>[2,[0,1,4,5],F_TIMELINE],
+				}->{defined($g[0]) ? $_."_" : $_}};
 
 				push(@where_base,$C->{MySQL}->{SEARCH_.$i._NP});
-				push(@bind,($user_id,$screen_name,$flag,$flag)[0..$l - 1]);
+				push(@bind,($user_id,$screen_name,0,$g[0],$flag,$flag)[@{$index}]);
 			}
 		}
 		if($GET{e} == 1 && (length($GET{egrep}) || length($GET{grep}))){
@@ -1568,7 +1629,7 @@ sub cb_show
 			$#where_time != -1 ? join(" AND ",@where_time) : 1,
 			$#where_base != -1 ? join(" OR ",@where_base) : 0,
 			$#where_char != -1 ? join(" AND ",@where_char) : 1,
-			$g[7] * $C->{_}->{LIMIT},
+			$g[8] * $C->{_}->{LIMIT},
 			$C->{_}->{LIMIT},
 		);
 

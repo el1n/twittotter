@@ -140,6 +140,7 @@ a:hover,a:active {
 	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
 :#	border-left:solid 1px #ffffff;
 	background-color:#ffffff;
+	font-size:<:FONT_SIZE - 1:>pt;
 	text-align:center;
 }
 .main .search {
@@ -277,6 +278,7 @@ a:hover,a:active {
 			:}else{
 			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "t" ? "active" : "inactive":>"><a href="/<:$screen_name:>/t">ついっと</a></div>
 			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "m" ? "active" : "inactive":>"><a href="/<:$screen_name:>/m">@<:$screen_name:></a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "n" ? "active" : "inactive":>"><a href="/<:$screen_name:>/n">@ した</a></div>
 			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "r" ? "active" : "inactive":>"><a href="/<:$screen_name:>/r">りついっと した</a></div>
 			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "e" ? "active" : "inactive":>"><a href="/<:$screen_name:>/e">りついっと された</a></div>
 			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "q" ? "active" : "inactive":>"><a href="/<:$screen_name:>/q">くおとついっと した</a></div>
@@ -352,28 +354,17 @@ a:hover,a:active {
 				</tr>
 				:}
 			</table>
-		:}elsif !$BORROW.IS_SEARCH && $MATCH[3] == "n" {
-			<table class="queue">
-				<tr>
-					<th colspan="2">基本情報</th>
-				</tr>
-				<tr>
-					<td>Twitter登録日</td>
-					<td><:$created_at:></td>
-				</tr>
-				<tr>
-					<td>ツイート総数</td>
-					<td><:$statuses_count:></td>
-				</tr>
-				<tr>
-					<td>フォローしている</td>
-					<td><:$friends_count:></td>
-				</tr>
-				<tr>
-					<td>フォローされている</td>
-					<td><:$followers_count:></td>
-				</tr>
-			</table>
+		:}elsif !$BORROW.IS_SEARCH && $MATCH[3] == "o" {
+		<table class="queue">
+			:for $twittotter.analyze.result_8704 -> $e {
+			<tr>
+				<td>@<:$e.screen_name:></td>
+				<td><:$e.i_8192:></td>
+				<td><:$e.i_512:></td>
+				<td><a href="/<:$screen_name:>/mn/<:$e.screen_name:>">いちらん</a></td>
+			</tr>
+			:}
+		</table>
 		:}else{
 		:if !$BORROW.IS_SHOW && $GET.l == nil {
 		<div class="search">
@@ -407,101 +398,101 @@ a:hover,a:active {
 				<input type="hidden" name="c" value="<:$MATCH[3]:>" />
 				:}
 				けんさく<input type="text" size="40" name="grep" value="<:$GET.grep:>" />
-				&nbsp;普通<input type="radio" name="e" value="0"<:$GET.e ? "" : " checked=\"checked\"":> />
-				&nbsp;正規表現<input type="radio" name="e" value="1"<:$GET.e ? " checked=\"checked\"" : "":> />
+				&nbsp;普通<input type="radio" name="e" value="0"<:$GET.e ? "" : " checked=\"checked\""|raw:> />
+				&nbsp;正規表現<input type="radio" name="e" value="1"<:$GET.e ? " checked=\"checked\"" : ""|raw:> />
 				&nbsp;<input type="submit" name="" value="発動" />
 				:if $BORROW.IS_SEARCH {
 				<table class="">
 					<tr>
 						<td>ついっと</td>
-						<td><input type="checkbox" name="c" value="t"<:match($MATCH[3],"t") ? " checked=\"checked\"" : "":> /></td>
-						<td>@<:$screen_name:></td>
-						<td><input type="checkbox" name="c" value="m"<:match($MATCH[3],"m") ? " checked=\"checked\"" : "":> /></td>
+						<td><input type="checkbox" name="c" value="t"<:match($MATCH[3],"t") ? " checked=\"checked\"" : ""|raw:> /></td>
+						<td>ああああ</td>
+						<td><input type="checkbox" name="i" value="q"<:match($MATCH[3],"i") ? " checked=\"checked\"" : ""|raw:> /></td>
 						<td>&nbsp;&nbsp;</td>
 						<td>ひづけ</td>
 						<td colspan="2">
 							<select name="y-">
 								<option value="">*</option>
 								:for [2006..$BORROW.y] -> $i {
-								<option value="<:$i:>"<:$MATCH[4] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								<option value="<:$i:>"<:$MATCH[5] == $i ? " selected=\"selected\"" : ""|raw:>><:$i:></option>
 								:}
 							</select>
 							-
 							<select name="m-">
 								<option value="">*</option>
 								:for [1..12] -> $i {
-								<option value="<:$i:>"<:$MATCH[5] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								<option value="<:$i:>"<:$MATCH[6] == $i ? " selected=\"selected\"" : ""|raw:>><:$i:></option>
 								:}
 							</select>
 							-
 							<select name="d-">
 								<option value="">*</option>
 								:for [1..31] -> $i {
-								<option value="<:$i:>"<:$MATCH[6] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								<option value="<:$i:>"<:$MATCH[7] == $i ? " selected=\"selected\"" : ""|raw:>><:$i:></option>
 								:}
 							</select>
 						</td>
 						<td>から</td>
 					</tr>
 					<tr>
-						<td>りついっと した</td>
-						<td><input type="checkbox" name="c" value="r"<:match($MATCH[3],"r") ? " checked=\"checked\"" : "":> /></td>
-						<td>りついっと された</td>
-						<td><input type="checkbox" name="c" value="e"<:match($MATCH[3],"e") ? " checked=\"checked\"" : "":> /></td>
+						<td>@<:$screen_name:></td>
+						<td><input type="checkbox" name="c" value="m"<:match($MATCH[3],"m") ? " checked=\"checked\"" : ""|raw:> /></td>
+						<td>@ した</td>
+						<td><input type="checkbox" name="c" value="n"<:match($MATCH[3],"n") ? " checked=\"checked\"" : ""|raw:> /></td>
 						<td></td>
 						<td></td>
 						<td colspan="2">
 							<select name="-y">
 								<option value="">*</option>
 								:for [2006..$BORROW.y] -> $i {
-								<option value="<:$i:>"<:$MATCH[8] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								<option value="<:$i:>"<:$MATCH[9] == $i ? " selected=\"selected\"" : ""|raw:>><:$i:></option>
 								:}
 							</select>
 							-
 							<select name="-m">
 								<option value="">*</option>
 								:for [1..12] -> $i {
-								<option value="<:$i:>"<:$MATCH[9] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								<option value="<:$i:>"<:$MATCH[10] == $i ? " selected=\"selected\"" : ""|raw:>><:$i:></option>
 								:}
 							</select>
 							-
 							<select name="-d">
 								<option value="">*</option>
 								:for [1..31] -> $i {
-								<option value="<:$i:>"<:$MATCH[10] == $i ? " selected=\"selected\"" : "":>><:$i:></option>
+								<option value="<:$i:>"<:$MATCH[11] == $i ? " selected=\"selected\"" : ""|raw:>><:$i:></option>
 								:}
 							</select>
 						</td>
 						<td>まで</td>
 					</tr>
 					<tr>
-						<td>くおとついっと した</td>
-						<td><input type="checkbox" name="c" value="q"<:match($MATCH[3],"q") ? " checked=\"checked\"" : "":> /></td>
-						<td>くおとついっと された</td>
-						<td><input type="checkbox" name="c" value="u"<:match($MATCH[3],"u") ? " checked=\"checked\"" : "":> /></td>
+						<td>りついっと した</td>
+						<td><input type="checkbox" name="c" value="r"<:match($MATCH[3],"r") ? " checked=\"checked\"" : ""|raw:> /></td>
+						<td>りついっと された</td>
+						<td><input type="checkbox" name="c" value="e"<:match($MATCH[3],"e") ? " checked=\"checked\"" : ""|raw:> /></td>
 						<td></td>
 						<td>URLだけ</td>
-						<td><input type="checkbox" name="o" value="urlonly"<:match($GET.o,"urlonly") ? " checked=\"checked\"" : "":> /></td>
+						<td><input type="checkbox" name="o" value="urlonly"<:match($GET.o,"urlonly") ? " checked=\"checked\"" : ""|raw:> /></td>
 						<td>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td>
 					</tr>
 					<tr>
-						<td><span style="color:yellow;">&#9733;</span> した</td>
-						<td><input type="checkbox" name="c" value="f"<:match($MATCH[3],"f") ? " checked=\"checked\"" : "":> /></td>
-						<td><span style="color:yellow;">&#9733;</span> された</td>
-						<td><input type="checkbox" name="c" value="a"<:match($MATCH[3],"a") ? " checked=\"checked\"" : "":> /></td>
+						<td>くおとついっと した</td>
+						<td><input type="checkbox" name="c" value="q"<:match($MATCH[3],"q") ? " checked=\"checked\"" : ""|raw:> /></td>
+						<td>くおとついっと された</td>
+						<td><input type="checkbox" name="c" value="u"<:match($MATCH[3],"u") ? " checked=\"checked\"" : ""|raw:> /></td>
 						<td></td>
 						<td>画像だけ</td>
-						<td><input type="checkbox" name="o" value="imgonly"<:match($GET.o,"imgonly") ? " checked=\"checked\"" : "":> /></td>
+						<td><input type="checkbox" name="o" value="imgonly"<:match($GET.o,"imgonly") ? " checked=\"checked\"" : ""|raw:> /></td>
 						<td></td>
 					</tr>
 					<tr>
-						<td>ああああ</td>
-						<td><input type="checkbox" name="i" value="q"<:match($MATCH[3],"i") ? " checked=\"checked\"" : "":> /></td>
-						<td></td>
-						<td></td>
+						<td><span style="color:yellow;">&#9733;</span> した</td>
+						<td><input type="checkbox" name="c" value="f"<:match($MATCH[3],"f") ? " checked=\"checked\"" : ""|raw:> /></td>
+						<td><span style="color:yellow;">&#9733;</span> された</td>
+						<td><input type="checkbox" name="c" value="a"<:match($MATCH[3],"a") ? " checked=\"checked\"" : ""|raw:> /></td>
 						<td></td>
 						<td>動画だけ</td>
-						<td><input type="checkbox" name="o" value="movonly"<:match($GET.o,"movonly") ? " checked=\"checked\"" : "":> /></td>
+						<td><input type="checkbox" name="o" value="movonly"<:match($GET.o,"movonly") ? " checked=\"checked\"" : ""|raw:> /></td>
 						<td></td>
 					</tr>
 				</table>
@@ -545,7 +536,7 @@ a:hover,a:active {
 			</tr>
 			<tr>
 			:}
-				<td class="<:$i - 1 == $MATCH[11] ? "active" : "":>"><a href="<:$BORROW.location:>/<:$i:>?<:$ENV.QUERY_STRING:>"><:$i:></a></td>
+				<td class="<:$i - 1 == $MATCH[12] ? "active" : "":>"><a href="<:$BORROW.location:>/<:$i:>?<:$ENV.QUERY_STRING:>"><:$i:></a></td>
 			:}
 			</tr>
 		</table>
