@@ -124,8 +124,9 @@ SALVAGE_12=SELECT `flag` FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 SALVAGE_13=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,3
 #SALVAGE_14=SELECT ?,`status_id` - 1 AS `status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` ASC LIMIT 0,1
 ANALYZE_0=SELECT DATE_FORMAT(`created_at`,'%Y-%m') as `created_at_ym`,COUNT(*) as `i` FROM `Tweet` WHERE `user_id` = ? OR `screen_name` = ? GROUP BY `created_at_ym` ORDER BY `created_at_ym` DESC
-ANALYZE_1=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referring_screen_name` ORDER BY `i` DESC LIMIT 0,20
-ANALYZE_2=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referred_screen_name` ORDER BY `i` DESC LIMIT 0,20
+ANALYZE_1=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referring_screen_name` ORDER BY `i` DESC
+ANALYZE_2=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referred_screen_name` ORDER BY `i` DESC
+ANALYZE_3=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND `referred_hash` IS NOT NULL GROUP BY `referred_hash` ORDER BY `i` DESC LIMIT 0,20
 
 INDEX_0=INSERT `Token` (`user_id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`,`ctime`) VALUES(?,?,?,?,CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE `ACCESS_TOKEN` = ?,`ACCESS_TOKEN_SECRET` = ?
 INDEX_1=SELECT DISTINCT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` RIGHT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE (`Bind`.`referring_screen_name` = ? OR `Bind`.`referring_screen_name` = ?) AND `Bind`.`referred_hash` LIKE ? AND `Tweet`.`flag` & ? = ? AND `Tweet`.`flag` & ? = 0 ORDER BY `Tweet`.`created_at` DESC
@@ -262,7 +263,7 @@ if(defined($ENV{GATEWAY_INTERFACE})){
 			[qr/./,undef,\&cb_prepare],
 			[qr/^\/?$/,undef,\&cb_index],
 			[qr/^(\/([0-9A-Za-z_]{1,15}))\/c\/?$/,undef,\&cb_conf],
-			[qr/^(\/([0-9A-Za-z_]{1,15})(?:\.([abd-z]+))?(?:\/([a-z]+))?(?:\/([0-9A-Za-z_]{1,15}))?(?:\/(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?(\-)?(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?)?)(?:\/(\d+))?\/?$/,16,\&cb_show],
+			[qr/^(\/([0-9A-Za-z_]{1,15})(?:\.([abd-z]+))?(?:\/([a-z]+))?(?:\/\@([0-9A-Za-z_]{1,15}))?(?:\/(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?(\-)?(?:(\d{4})(?:\-(\d{1,2})(?:\-(\d{1,2}))?)?)?)?)(?:\/(\d+))?\/?$/,16,\&cb_show],
 			[qr/./,undef,sub{$SES{HTTP_REFERER} = $ENV{REQUEST_URI}}],
 		],
 		CGI::Session =>["driver:memcached",undef,{Memcached =>$B->{Cache::Memcached}}],
@@ -460,7 +461,7 @@ given(shift(@ARGV)){
 					},
 				);
 
-				@{$r}{qw(priority atime)} = (I_PRIORITY_LOW,300);
+				@{$r}{qw(priority atime)} = (I_PRIORITY_LOW,3600);
 				&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
 				&new_queue(@{$r}{qw(user_id screen_name order priority atime flag)});
 			}
@@ -1260,7 +1261,11 @@ sub analyze
 		$t->{"i_".F_REPLYTO} = ((grep{$_->{referred_screen_name} eq $t->{screen_name}}@{$r->{"result_".F_REPLYTO}})[0] // {i =>0})->{i};
 		$t->{"i_".(F_REPLIES|F_REPLYTO)} = $r->{"i_".F_REPLIES} + $r->{"i_".F_REPLYTO};
 		$t
-	}uniq(map{$_->{referring_screen_name}}@{$r->{"result_".F_REPLIES}},map{$_->{referred_screen_name}}@{$r->{"result_".F_REPLYTO}})];
+	}grep{defined($_)}uniq(map{$_->{referring_screen_name}}@{$r->{"result_".F_REPLIES}},map{$_->{referred_screen_name}}@{$r->{"result_".F_REPLYTO}})];
+
+	if($B->{DBT_ANALYZE_3}->execute($user_id,$screen_name)){
+		$r->{"result_hash"} = $B->{DBT_ANALYZE_3}->fetchall_arrayref({});
+	}
 
 	my $sign = join(".",$C->{_}->{CACHE_PREFIX},$screen_name).".";
 	$B->{Cache::Memcached}->set($sign."analyze",$r,$C->{Cache}->{PROFILE_EXPIRE});
@@ -1508,8 +1513,8 @@ sub cb_show
 		}elsif(defined($structure->{in_reply_to_status_id})){
 			$structure->{text} =~s/^\@([0-9A-Za-z_]{1,15})/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>&nbsp;<a href="https:\/\/twitter.com\/#!\/$1\/status\/$structure->{in_reply_to_status_id}" target="_blank">&raquo;<\/a>/g;
 		}else{
-			$structure->{text} =~s/\@([0-9A-Za-z_]{1,15})(?![^<>]+>)(?![^<>]+<\/a>)/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>/g;
 		}
+			$structure->{text} =~s/\@([0-9A-Za-z_]{1,15})(?![^<>]+>)(?![^<>]+<\/a>)/<a href="https:\/\/twitter.com\/#!\/$1" target="_blank">\@$1<\/a>/g;
 
 		my $dt = encode_DateTime($structure->{created_at});
 		$structure->{created_at_formatted} = $dt->strftime("%Y-%m-%d %H:%M");
