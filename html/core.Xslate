@@ -405,6 +405,7 @@ a:hover,a:active {
 						<th></th>
 					</tr>
 					:for $twittotter.analyze.result_8704 -> $e {
+					:if $~e > 19 { last }
 					<tr>
 						<td>@<:$e.screen_name:></td>
 						<td><:$e.i_8192:></td>
@@ -423,8 +424,9 @@ a:hover,a:active {
 						<th></th>
 					</tr>
 					:for $twittotter.analyze.result_hash -> $e {
+					:if $~e > 19 { last }
 					<tr>
-						<td>#<:$e.referred_hash:></td>
+						<td>#<:omit($e.referred_hash,16):></td>
 						<td><:$e.i:></td>
 						<td><a href="/<:$screen_name:>/t?grep=%23<:$e.referred_hash:>">いちらん</a></td>
 					</tr>

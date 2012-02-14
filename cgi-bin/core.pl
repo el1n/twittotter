@@ -44,6 +44,7 @@ use constant F_FAVORITED =>1 << 16;
 use constant F_SYNCHRONIZED =>1 << 17;
 use constant F_TIMELINE =>1 << 18;
 use constant F_HASH =>1 << 19;
+use constant F_REPLIED =>1 << 20;
 use constant F_IMPORT_TWILOG =>1 << 33;
 use constant F_SURELY_MASK =>F_TWEETS|F_REPLIES|F_FAVORITES|F_RETWEETED|F_TIMELINE;
 use constant F_IMPORT_MASK =>F_SURELY_MASK|F_IMPORT_TWILOG;
@@ -106,6 +107,7 @@ CLI_R4_1=UPDATE `Tweet` SET `text` = ?,`structure` = ?,`revision` = 4 WHERE `sta
 CLI_R5_0=SELECT * FROM `Tweet` WHERE `revision` = 4 ORDER BY `created_at` DESC LIMIT 0,1
 CLI_R5_1=UPDATE `Tweet` SET `text` = ?,`structure` = ?,`revision` = 5 WHERE `status_id` = ?
 CLI_R5_2=UPDATE `Tweet` SET `revision` = 5 WHERE `status_id` = ?
+CLI_R7_0=SELECT * FROM `Tweet` ORDER BY `created_at` DESC
 CLI_SD_0=SELECT * FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 
 SALVAGE_0=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,1
@@ -154,8 +156,8 @@ SEARCH_17_NP=UNIX_TIMESTAMP(`Tweet`.`created_at`) >= UNIX_TIMESTAMP(?)
 SEARCH_18_NP=UNIX_TIMESTAMP(DATE(`Tweet`.`created_at`)) < UNIX_TIMESTAMP(DATE_ADD(?,INTERVAL 1 YEAR))
 SEARCH_19_NP=UNIX_TIMESTAMP(DATE(`Tweet`.`created_at`)) < UNIX_TIMESTAMP(DATE_ADD(?,INTERVAL 1 MONTH))
 SEARCH_20_NP=UNIX_TIMESTAMP(DATE(`Tweet`.`created_at`)) < UNIX_TIMESTAMP(DATE_ADD(?,INTERVAL 1 DAY))
-SEARCH_21_NP=(((`Bind`.`referring_user_id` = ? OR `Bind`.`referring_screen_name` = ?) AND (`Bind`.`referred_user_id` = ? OR `Bind`.`referred_screen_name` = ?)) AND `Bind`.`flag` & ? = ?)
-SEARCH_22_NP=(((`Bind`.`referred_user_id` = ? OR `Bind`.`referred_screen_name` = ?) AND (`Bind`.`referring_user_id` = ? OR `Bind`.`referring_screen_name` = ?)) AND `Bind`.`flag` & ? = ?)
+SEARCH_21_NP=(((`Bind`.`referring_user_id` = ? OR `Bind`.`referring_screen_name` = ?) AND (`Bind`.`referred_user_id` = ? OR `Bind`.`referred_screen_name` = ?)) AND `Bind`.`flag` & ? != 0)
+SEARCH_22_NP=(((`Bind`.`referred_user_id` = ? OR `Bind`.`referred_screen_name` = ?) AND (`Bind`.`referring_user_id` = ? OR `Bind`.`referring_screen_name` = ?)) AND `Bind`.`flag` & ? != 0)
 
 [Memcached]
 HOST=127.0.0.1:11211
@@ -169,7 +171,7 @@ SALVAGE.FAVORITE=過去のお気に入り取得 (200件)
 EOF
 	@{$C}{qw(Twitter API)} = @{Config::Tiny->read("core.conf")}{qw(Twitter API)};
 	$B = {
-		DBI =>DBI->connect(sprintf("dbi:mysql:database=%s;host=%s;port=%d",@{$C->{MySQL}}{qw(DATABASE HOST PORT)}),@{$C->{MySQL}}{qw(USERNAME PASSWORD)}),
+		DBI =>DBI->connect(sprintf("dbi:mysql:database=%s;host=%s;port=%d",@{$C->{MySQL}}{qw(DATABASE HOST PORT)}),@{$C->{MySQL}}{qw(USERNAME PASSWORD),{mysql_enable_utf8 =>1}}),
 		Cache::Memcached =>Cache::Memcached::libmemcached->new({servers =>[split(/ /o,$C->{Memcached}->{HOST})]}),
 		BlackCurtain::Fragility =>BlackCurtain::Fragility->new(requests_redirectable =>[]),
 	};
@@ -267,7 +269,20 @@ if(defined($ENV{GATEWAY_INTERFACE})){
 			[qr/./,undef,sub{$SES{HTTP_REFERER} = $ENV{REQUEST_URI}}],
 		],
 		CGI::Session =>["driver:memcached",undef,{Memcached =>$B->{Cache::Memcached}}],
-		Text::Xslate =>[path =>[split(/ /o,$C->{_}->{TEMPLATE})],cache_dir =>$C->{_}->{CACHE_DIR},module =>[qw(Text::Xslate::Bridge::Star Calendar::Simple URI::Escape)]],
+		Text::Xslate =>[
+			path =>[split(/ /o,$C->{_}->{TEMPLATE})],
+			cache =>1,
+			cache_dir =>$C->{_}->{CACHE_DIR},
+			function =>{
+				#omit =>sub{ return(length($_[0]) > $_[1] ? substr($_[0],0,$_[1])."..." : $_[0]) },
+				omit =>sub{ my($g,$i) = (Encode::decode_utf8(shift()),shift());return(length($g) > $i ? substr($g,0,$i)."..." : $g) },
+			},
+			module =>[
+				Text::Xslate::Bridge::Star,
+				URI::Escape,
+				Calendar::Simple,
+			],
+		],
 	)->perform();
 }else{
 
@@ -560,6 +575,16 @@ given(shift(@ARGV)){
 					die($r->{status_id});
 				}
 				printf("Skip %d, revision %d to 5.\n",@{$r}{qw(status_id revision)});
+			}
+		}
+	}
+	when("-u7"){
+		if($B->{DBT_CLI_R7_0}->execute() != 0){
+			while(my $r = unpack_structure($B->{DBT_CLI_R7_0}->fetchrow_hashref())){
+				if(!&r7_processer(@{$r}{qw(structure flag)})){
+					die($r->{status_id});
+				}
+				printf("Converted %d.\n",@{$r}{qw(status_id)});
 			}
 		}
 	}
@@ -938,6 +963,16 @@ sub salvage
 			warn("r4_processer error.");
 			return(-1);
 		}
+		#if(!&r5_processer($structure,$flag)){
+		#	return(-1);
+		#}
+		#if(!&r6_processer($structure,$flag)){
+		#	return(-1);
+		#}
+		if(!&r7_processer($structure,$flag)){
+			warn("r7_processer error.");
+			return(-1);
+		}
 
 		for(@flag){
 			$flag |= $_;
@@ -1227,6 +1262,34 @@ sub r5_processer
 {
 	my $structure = shift();
 	my $flag = shift();
+
+	return(1);
+}
+
+sub r6_processer
+{
+	my $structure = shift();
+	my $flag = shift();
+
+	return(1);
+}
+
+sub r7_processer
+{
+	my $structure = shift()->{twitter};
+	my $flag = shift();
+
+	if(defined($structure->{in_reply_to_status_id})){
+		&bind(
+			$structure->{in_reply_to_status_id},
+			$structure->{user}->{id},
+			$structure->{user}->{screen_name},
+			$structure->{in_reply_to_user_id},
+			$structure->{in_reply_to_screen_name},
+			F_REPLIED | F_SYNCHRONIZED,
+		);
+		warn(sprintf("%s -> %s Binded F_REPLIED(%d).",@{$structure}{qw(id in_reply_to_status_id)},F_REPLIED));
+	}
 
 	return(1);
 }
@@ -1595,8 +1658,8 @@ sub cb_show
 					a =>[3,[0,1,4,5],F_FAVORITES],
 					i =>[2,[0,1,4,5],F_TIMELINE],
 					t_ =>[1,[0,1],F_TWEETS],
-					m_ =>[22,[0,1,2,3,4,5],F_REPLIES],
-					n_ =>[21,[0,1,2,3,4,5],F_REPLYTO],
+					m_ =>[22,[0,1,2,3,4],F_REPLIES|F_REPLIED],
+					n_ =>[21,[0,1,2,3,4],F_REPLYTO|F_REPLIED],
 					r_ =>[2,[0,1,4,5],F_RETWEETS],
 					e_ =>[3,[0,1,4,5],F_RETWEETED],
 					q_ =>[2,[0,1,4,5],F_QUOTETWEETS],
