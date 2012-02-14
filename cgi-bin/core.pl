@@ -45,6 +45,8 @@ use constant F_SYNCHRONIZED =>1 << 17;
 use constant F_TIMELINE =>1 << 18;
 use constant F_HASH =>1 << 19;
 use constant F_REPLIED =>1 << 20;
+use constant F_FOLLOWING =>1 << 30;
+use constant F_FOLLOWED =>1 << 31;
 use constant F_IMPORT_TWILOG =>1 << 33;
 use constant F_SURELY_MASK =>F_TWEETS|F_REPLIES|F_FAVORITES|F_RETWEETED|F_TIMELINE;
 use constant F_IMPORT_MASK =>F_SURELY_MASK|F_IMPORT_TWILOG;
@@ -63,7 +65,7 @@ LOCALE=ja_JP
 HTML=/var/www/twittotter/html
 TEMPLATE=/var/www/twittotter/html
 CACHE_DIR=/tmp
-CACHE_PREFIX=twittotter
+CACHE_NAMESPACE=twittotter
 
 LIMIT=48
 
@@ -116,7 +118,7 @@ SALVAGE_2=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.
 SALVAGE_3=SELECT ?,`Tweet`.`status_id` - 1 AS `status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referred_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` ASC LIMIT 0,1
 SALVAGE_4=SELECT ?,`Tweet`.`status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referring_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` DESC LIMIT 0,1
 SALVAGE_5=SELECT ?,`Tweet`.`status_id` - 1 AS `status_id` FROM `Tweet` LEFT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE `Bind`.`referring_user_id` = ? AND `Bind`.`flag` & ? = ? ORDER BY `Tweet`.`status_id` ASC LIMIT 0,1
-SALVAGE_6=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_at`,`structure`,`flag`) VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `flag` = `flag` | ?
+SALVAGE_6=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_at`,`structure`,`flag`) VALUES (?,?,?,?,?,?,?)
 SALVAGE_7=SELECT 1 FROM `Bind` WHERE `status_id` = ? AND ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?) OR (? IS NOT NULL AND `referred_hash` = ?)) AND `flag` & ? = ? LIMIT 0,1
 SALVAGE_8=INSERT `Bind` (`status_id`,`referring_user_id`,`referring_screen_name`,`referred_user_id`,`referred_screen_name`,`referred_hash`,`flag`) VALUES(?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `flag` = `flag` | ?
 SALVAGE_9=UPDATE `Bind` SET `flag` = ? WHERE `status_id` = ? AND ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?) OR (? IS NOT NULL AND `referred_hash` = ?)) AND `flag` & ? = ?
@@ -125,6 +127,12 @@ SALVAGE_11=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_a
 SALVAGE_12=SELECT `flag` FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 SALVAGE_13=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,3
 #SALVAGE_14=SELECT ?,`status_id` - 1 AS `status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` ASC LIMIT 0,1
+FOLLOW_0=SELECT 1 FROM `Follow` WHERE ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND `flag` & ? = ? LIMIT 0,1
+FOLLOW_1=SELECT 1 FROM `Follow` WHERE ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND `flag` & ? = ? LIMIT 0,1
+FOLLOW_2=INSERT `Follow` (`referring_user_id`,`referring_screen_name`,`referred_user_id`,`referred_screen_name`,`ctime`,`flag`) VALUES(?,?,?,?,CURRENT_TIMESTAMP,?)
+FOLLOW_3=INSERT `Follow` (`referred_user_id`,`referred_screen_name`,`referring_user_id`,`referring_screen_name`,`ctime`,`flag`) VALUES(?,?,?,?,CURRENT_TIMESTAMP,?)
+FOLLOW_4=UPDATE `Follow` SET `flag` = `flag` | ? WHERE ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND `flag` & ? = ?
+FOLLOW_5=UPDATE `Follow` SET `flag` = `flag` | ? WHERE ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND `flag` & ? = ?
 ANALYZE_0=SELECT DATE_FORMAT(`created_at`,'%Y-%m') as `created_at_ym`,COUNT(*) as `i` FROM `Tweet` WHERE `user_id` = ? OR `screen_name` = ? GROUP BY `created_at_ym` ORDER BY `created_at_ym` DESC
 ANALYZE_1=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referring_screen_name` ORDER BY `i` DESC
 ANALYZE_2=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referred_screen_name` ORDER BY `i` DESC
@@ -649,7 +657,6 @@ sub salvage
 				$referred_user_id,
 				$referred_screen_name,
 				$referred_hash,
-				$flag,
 				$flag,
 			) == 0){
 				return();
@@ -1294,6 +1301,86 @@ sub r7_processer
 	return(1);
 }
 
+sub follow
+{
+	my $q = shift();
+	my $m = shift();
+	my $d = shift();
+	my $g = shift();
+	my($screen_name) = @{$q};
+	my($location,$screen_name,$issue) = @{$m};
+	my($user_id,$flag) = @{$d}{qw(user_id flag)};
+	$user_id //= user_id($screen_name);
+
+	my $sign = join(".",$C->{_}->{CACHE_NAMESPACE},$screen_name).".";
+	my $r;
+	given($flag){
+		when(F_FOLLOWING){
+			my $cursor = $B->{Cache::Memcached}->get($sign."following.cursor") || -1;
+			if(!($r = $B->{Net::Twitter}->friends_ids({id =>$user_id,cursor =>$cursor}))){
+				warn();
+				return(-1);
+			}
+			$B->{Cache::Memcached}->set($sign."following.cursor",$r->{next_cursor},0);
+		}
+		when(F_FOLLOWED){
+			my $cursor = $B->{Cache::Memcached}->get($sign."followed.cursor") || -1;
+			if(!($r = $B->{Net::Twitter}->followers_ids({id =>$user_id,cursor =>$cursor}))){
+				warn();
+				return(-1);
+			}
+			$B->{Cache::Memcached}->set($sign."followed.cursor",$r->{next_cursor},0);
+		}
+		default{
+			return(-1);
+		}
+	}
+
+	for my $referred_user_id (@{$r->{ids}}){
+		$referred_screen_name = screen_name($referred_user_id);
+
+		my $i;
+		given($flag){
+			when(F_FOLLOWING){
+				$i = 0;
+			}
+			when(F_FOLLOWED){
+				$i = 1;
+			}
+		}
+		if($B->{DBT_FOLLOW_.$i + 0}->execute(
+			$user_id,
+			$screen_name,
+			$referred_user_id,
+			$referred_screen_name,
+			$flag,
+			$flag,
+		) > 0){
+			if($B->{DBT_FOLLOW_.$i + 4}->execute(
+				$flag | F_TMPORARY,
+				$user_id,
+				$screen_name,
+				$referred_user_id,
+				$referred_screen_name,
+				$flag,
+				$flag,
+			) == 0){
+				return();
+			}
+		}else{
+			if($B->{DBT_FOLLOW_.$i + 2}->execute(
+				$user_id,
+				$screen_name,
+				$referred_user_id,
+				$referred_screen_name,
+				$flag | F_TMPORARY,
+			) == 0){
+				return();
+			}
+		}
+	}
+}
+
 sub analyze
 {
 	my $q = shift();
@@ -1330,7 +1417,7 @@ sub analyze
 		$r->{"result_hash"} = $B->{DBT_ANALYZE_3}->fetchall_arrayref({});
 	}
 
-	my $sign = join(".",$C->{_}->{CACHE_PREFIX},$screen_name).".";
+	my $sign = join(".",$C->{_}->{CACHE_NAMESPACE},$screen_name).".";
 	$B->{Cache::Memcached}->set($sign."analyze",$r,$C->{Cache}->{PROFILE_EXPIRE});
 
 	return(1);
@@ -1381,7 +1468,7 @@ sub cb_index
 {
 	if(!defined($GET{op})){
 		my $r;
-		my $sign = join(".",$C->{_}->{CACHE_PREFIX},$GET{l});
+		my $sign = join(".",$C->{_}->{CACHE_NAMESPACE},$GET{l});
 		if(!defined($r = $B->{Cache::Memcached}->get($sign))){
 			$r = {
 				id =>undef,
@@ -1511,8 +1598,8 @@ sub cb_show
 		},
 	);
 
+	my $sign = join(".",$C->{_}->{CACHE_NAMESPACE},$screen_name).".";
 	my $r;
-	my $sign = join(".",$C->{_}->{CACHE_PREFIX},$screen_name).".";
 	if(!defined($r = $B->{Cache::Memcached}->get($sign."profile"))){
 		if(!($r = $B->{Net::Twitter}->show_user({screen_name =>$screen_name}))){
 			return(&cb_exception(undef,undef,undef,"ユーザ情報取得失敗"));
