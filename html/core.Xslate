@@ -148,6 +148,8 @@ a:hover,a:active {
 :#	padding:0px 0px 0px 0px;
 }
 .main .analyze h2 {
+	margin:4px 16px 8px 16px;
+:#	padding:0px 0px 0px 0px;
 :#	border:solid 1px #<:$profile_sidebar_border_color:>;
 :#	border-top:solid 1px #<:$profile_sidebar_border_color:>;
 :#	border-right:solid 1px #<:$profile_sidebar_border_color:>;
@@ -179,7 +181,6 @@ a:hover,a:active {
 :#	border-left:solid 1px #ffffff;
 	background-color:#ffffff;
 	font-size:<:FONT_SIZE - 1:>pt;
-	text-align:center;
 }
 .main .search {
 	margin:8px 8px 8px 8px;
@@ -395,13 +396,62 @@ a:hover,a:active {
 			</table>
 		:}elsif !$BORROW.IS_SEARCH && $MATCH[3] == "o" {
 		<div class="analyze">
+			<div class="">
+				<h2 class="">きほんじょうほう</h2>
+				<table class="">
+					<tr>
+						<th colspan="3">&nbsp;</th>
+					</tr>
+					<tr>
+						<td rowspan="2"><img class="" src="<:$profile_image_url_https:>" alt="<:$profile_image_url_https:>" /></td>
+						<td colspan="2"><:$name:> @<:$screen_name:></td>
+					</tr>
+					<tr>
+						<td colspan="2">
+							場所:&nbsp;<:$location:><br />
+							URL:&nbsp;<:$url:><br />
+							自己紹介:&nbsp;<:$description:><br />
+						</td>
+					</tr>
+					<tr>
+						<td>Twitter登録日</td>
+						<td><:$created_at:> - 経過日数0日 経過秒数0秒</td>
+						<td>-</td>
+					</tr>
+					<tr>
+						<td>ついーと</td>
+						<td><:$statuses_count:>回</td>
+						<td><a href="">しょうさい</a></td>
+					</tr>
+					<tr>
+						<td>ふぉろー している</td>
+						<td><:$friends_count:>人</td>
+						<td><a href="">しょうさい</a></td>
+					</tr>
+					<tr>
+						<td>ふぉろー されている</td>
+						<td><:$followers_count:>人</td>
+						<td><a href="">しょうさい</a></td>
+					</tr>
+					<tr>
+						<td>ふぁぼった</td>
+						<td><:$favourites_count:>回</td>
+						<td>-</td>
+					</tr>
+					<tr>
+						<td>りすと</td>
+						<td><:$listed_count:>人</td>
+						<td>-</td>
+					</tr>
+				</table>
+			</div>
 			<div class="cram">
 				<h2 class="">なかよし</h2>
-				<table class="queue">
+				<table class="">
 					<tr>
 						<th>&nbsp;</th>
-						<th>TO</th>
-						<th>FROM</th>
+						<th>送</th>
+						<th>受</th>
 						<th></th>
 					</tr>
 					:for $twittotter.analyze.result_8704 -> $e {
@@ -417,7 +467,7 @@ a:hover,a:active {
 			</div>
 			<div class="cram">
 				<h2 class="">はっしゅたぐ</h2>
-				<table class="queue">
+				<table class="">
 					<tr>
 						<th>&nbsp;</th>
 						<th></th>
