@@ -45,6 +45,8 @@ use constant F_SYNCHRONIZED =>1 << 17;
 use constant F_TIMELINE =>1 << 18;
 use constant F_HASH =>1 << 19;
 use constant F_REPLIED =>1 << 20;
+use constant F_FOLLOWING =>1 << 21;
+use constant F_FOLLOWED =>1 << 22;
 use constant F_IMPORT_TWILOG =>1 << 33;
 use constant F_SURELY_MASK =>F_TWEETS|F_REPLIES|F_FAVORITES|F_RETWEETED|F_TIMELINE;
 use constant F_IMPORT_MASK =>F_SURELY_MASK|F_IMPORT_TWILOG;
@@ -125,6 +127,11 @@ SALVAGE_11=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_a
 SALVAGE_12=SELECT `flag` FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 SALVAGE_13=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,3
 #SALVAGE_14=SELECT ?,`status_id` - 1 AS `status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` ASC LIMIT 0,1
+FOLLOW_0=SELECT 1 FROM `Follow` WHERE ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND `flag` & ? = ? LIMIT 0,1
+FOLLOW_2=INSERT `Follow` (`referring_user_id`,`referring_screen_name`,`referred_user_id`,`referred_screen_name`,`ctime`,`flag`) VALUES(?,?,?,?,CURRENT_TIMESTAMP,?)
+FOLLOW_4=UPDATE `Follow` SET `flag` = `flag` | ? WHERE ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND `flag` & ? = ?
+FOLLOW_6=UPDATE `Follow` SET `flag` = `flag` & ? | IF(`flag` & ?,?,0) WHERE ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND `flag` & ? = ?
+FOLLOW_8=UPDATE `Follow` SET `dtime` = CURRENT_TIMESTAMP WHERE ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND `flag` & ? = 0 AND `dtime` = '0000-00-00 00:00:00'
 ANALYZE_0=SELECT DATE_FORMAT(`created_at`,'%Y-%m') as `created_at_ym`,COUNT(*) as `i` FROM `Tweet` WHERE `user_id` = ? OR `screen_name` = ? GROUP BY `created_at_ym` ORDER BY `created_at_ym` DESC
 ANALYZE_1=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referring_screen_name` ORDER BY `i` DESC
 ANALYZE_2=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referred_screen_name` ORDER BY `i` DESC
@@ -337,7 +344,8 @@ given(shift(@ARGV)){
 				#&new_queue($user_id,$screen_name,"COMPARE.RETWEETED",I_PRIORITY_HIGH,0,F_RETWEETED);
 				#&new_queue($user_id,$screen_name,"COMPARE.FAVORITE",I_PRIORITY_HIGH,0,F_FAVORITES);
 				#&new_queue($user_id,$screen_name,"NULL.TEST",I_PRIORITY_HIGH,0,0);
-				&new_queue($user_id,$screen_name,"ANALYZE",I_PRIORITY_LOW,0,0);
+				#&new_queue($user_id,$screen_name,"ANALYZE",I_PRIORITY_LOW,0,0);
+				&new_queue($user_id,$screen_name,"FETCH.FOLLOWING",I_PRIORITY_HIGH,0,F_FOLLOWING);
 			}
 			return($user_id);
 		}
@@ -388,7 +396,7 @@ given(shift(@ARGV)){
 					[undef,$r->{screen_name}],
 					{
 						user_id =>$r->{user_id},
-						flag =>$r->{flag} & F_IMPORT_MASK,
+						flag =>$r->{flag} & F_SURELY_MASK,
 						axis =>1,
 					},
 				);
@@ -403,7 +411,7 @@ given(shift(@ARGV)){
 					[undef,$r->{screen_name}],
 					{
 						user_id =>$r->{user_id},
-						flag =>$r->{flag} & F_IMPORT_MASK,
+						flag =>$r->{flag} & F_SURELY_MASK,
 						axis =>-1,
 					},
 				);
@@ -426,7 +434,7 @@ given(shift(@ARGV)){
 					[undef,$r->{screen_name}],
 					{
 						user_id =>$r->{user_id},
-						flag =>$r->{flag} & F_IMPORT_MASK,
+						flag =>$r->{flag} & F_SURELY_MASK,
 						axis =>-1,
 					},
 				);
@@ -477,6 +485,20 @@ given(shift(@ARGV)){
 				);
 
 				@{$r}{qw(priority atime)} = (I_PRIORITY_LOW,3600);
+				&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
+				&new_queue(@{$r}{qw(user_id screen_name order priority atime flag)});
+			}
+			when(/^FETCH.FOLLOW/o){
+				$i = &follow(
+					[$r->{screen_name}],
+					[undef,$r->{screen_name}],
+					{
+						user_id =>$r->{user_id},
+						flag =>$r->{flag} & (F_FOLLOWING | F_FOLLOWED),
+					},
+				);
+
+				@{$r}{qw(priority atime)} = (I_PRIORITY_LOW,300);
 				&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
 				&new_queue(@{$r}{qw(user_id screen_name order priority atime flag)});
 			}
@@ -1293,6 +1315,119 @@ sub r7_processer
 	return(1);
 }
 
+sub follow
+{
+	my $q = shift();
+	my $m = shift();
+	my $d = shift();
+	my $g = shift();
+	my($screen_name) = @{$q};
+	my($location,$screen_name,$issue) = @{$m};
+	my($user_id,$flag) = @{$d}{qw(user_id flag)};
+	$user_id //= user_id($screen_name);
+
+	my $sign = join(".",$C->{_}->{CACHE_NAMESPACE},$screen_name).".";
+	my $r;
+	my $cursor;
+	my $i;
+	given($flag){
+		when(F_FOLLOWING){
+			$sign .= "following.cursor";
+			$cursor = $B->{Cache::Memcached}->get($sign) || -1;
+			$i = 0;
+
+			if(!($status = $B->{Net::Twitter}->friends_ids({id =>$user_id,cursor =>$cursor}))){
+				warn();
+				return(-1);
+			}
+		}
+		when(F_FOLLOWED){
+			$sign .= "followed.cursor";
+			$cursor = $B->{Cache::Memcached}->get($sign) || -1;
+			$i = 1;
+
+			if(!($status = $B->{Net::Twitter}->friends_ids({id =>$user_id,cursor =>$cursor}))){
+				warn();
+				return(-1);
+			}
+		}
+		default{
+			return(-1);
+		}
+	}
+
+	for my $referred_user_id (@{$r->{ids}}){
+		my $referred_screen_name = screen_name($referred_user_id);
+
+		if($B->{DBT_FOLLOW_.$i + 0}->execute(
+			$user_id,
+			$user_id,
+			$screen_name,
+			$screen_name,
+			$referred_user_id,
+			$referred_user_id,
+			$referred_screen_name,
+			$referred_screen_name,
+			$flag & (F_FOLLOWING | F_FOLLOWED),
+			$flag & (F_FOLLOWING | F_FOLLOWED),
+		) > 0){
+			if($B->{DBT_FOLLOW_.$i + 4}->execute(
+				$flag & (F_FOLLOWING | F_FOLLOWED) | F_TMPORARY,
+				$user_id,
+				$user_id,
+				$screen_name,
+				$screen_name,
+				$referred_user_id,
+				$referred_user_id,
+				$referred_screen_name,
+				$referred_screen_name,
+				$flag & (F_FOLLOWING | F_FOLLOWED),
+				$flag & (F_FOLLOWING | F_FOLLOWED),
+			) == 0){
+				return(-1);
+			}
+		}else{
+			if($B->{DBT_FOLLOW_.$i + 2}->execute(
+				$user_id,
+				$screen_name,
+				$referred_user_id,
+				$referred_screen_name,
+				$flag | F_TMPORARY,
+			) == 0){
+				return(-1);
+			}
+		}
+	}
+
+	if($r->{next_cursor} == 0){
+		if($B->{DBT_FOLLOW_.$i + 6}->execute(
+			F_FOLLOWING | F_FOLLOWED,
+			F_TMPORARY,
+			F_SYNCHRONIZED,
+			$user_id,
+			$user_id,
+			$screen_name,
+			$screen_name,
+			$flag & (F_FOLLOWING | F_FOLLOWED),
+			$flag & (F_FOLLOWING | F_FOLLOWED),
+		) == 0){
+			return(-1);
+		}
+		if($B->{DBT_FOLLOW_.$i + 6}->execute(
+			$user_id,
+			$user_id,
+			$screen_name,
+			$screen_name,
+			F_SYNCHRONIZED,
+		) == 0){
+			return(-1);
+		}
+	}
+	$B->{Cache::Memcached}->set($sign,$r->{next_cursor},0);
+
+	return(1);
+}
+
 sub analyze
 {
 	my $q = shift();
@@ -1431,6 +1566,12 @@ sub cb_index
 				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
 			}elsif(!&new_queue($SES{user_id},$SES{screen_name},"UPDATE.FAVORITE",I_PRIORITY_HIGH,0,F_QUEUE|F_FAVORITES)){
 				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
+			}elsif(!&new_queue($SES{user_id},$SES{screen_name},"ANALYZE",I_PRIORITY_LOW,0,F_QUEUE)){
+				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
+			#}elsif(!&new_queue($SES{user_id},$SES{screen_name},"FETCH.FOLLOWING",I_PRIORITY_MIDIUM,0,F_QUEUE|F_FOLLOWING)){
+			#	return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
+			#}elsif(!&new_queue($SES{user_id},$SES{screen_name},"FETCH.FOLLOWED",I_PRIORITY_MIDIUM,0,F_QUEUE|F_FOLLOWED)){
+			#	return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
 			}
 			return("jump","http://".$ENV{HTTP_HOST}.$ENV{SCRIPT_NAME}."/".$SES{screen_name});
 		}else{
