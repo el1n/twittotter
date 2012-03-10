@@ -1,0 +1,636 @@
+:constant SCREEN = 800
+:constant FONT_SIZE = 10
+:constant MENU_WIDTH = 160
+:constant TAB_WIDTH = 136
+:constant MEDIA_WIDTH = 128
+:constant MEDIA_HEIGHT = 78
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html version="-//W3C//DTD XHTML 1.1//EN" xmlns="http://www.w3.org/1999/xhtml" xml:lang="ja">
+<head>
+<title>ついっとったー - <:!$BORROW.IS_SHOW ? "ツイートを保存して検索できるようになるだけ" : "@"~$screen_name:></title>
+<style type="text/css">
+<!--
+.cram {
+	float:left;
+}
+.pile {
+	float:right;
+}
+.fall {
+	clear:both;
+}
+.mid {
+	margin:0px auto 0px auto;
+}
+
+.m {
+	font-size:<:FONT_SIZE + 0:>pt;
+}
+.l {
+	font-size:<:FONT_SIZE + 1:>pt;
+}
+.ll {
+	font-size:<:FONT_SIZE + 2:>pt;
+}
+.s {
+	font-size:<:FONT_SIZE - 1:>pt;
+}
+.ss {
+	font-size:<:FONT_SIZE - 2:>pt;
+}
+.n {
+	font-style:normal;
+	font-weight:normal;
+}
+.b {
+	font-weight:bold;
+}
+
+.silver {
+	color:#c0c0c0;
+}
+.dimgray {
+	color:#696969;
+}
+.gray {
+	color:#808080;
+}
+.red {
+	color:#ff0000;
+}
+.yellow {
+	color:#ffff00;
+}
+.green {
+	color:#008000;
+}
+.limegreen {
+	color:#32cd32;
+}
+
+.lj {
+	text-align:left;
+}
+.rj {
+	text-align:right;
+}
+.cj {
+	text-align:center;
+}
+
+body {
+	color:#<:$profile_text_color:>;
+	background-color:#<:$profile_background_color:>;
+	font-family:"Verdana";
+}
+a {
+	color:#<:$profile_link_color:>;
+	text-decoration:none;
+}
+a:hover,a:active {
+	text-decoration:underline;
+}
+
+a.help span {
+	display:none;
+}
+a.help:hover span {
+	display:inline;
+	position:absolute;
+	margin:-72px 0px 0px -192px;
+	padding:2px 2px 2px 2px;
+	width:160px;
+	height:90px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+	color:#<:$profile_text_color:>;
+	background-color:#ffffff;
+}
+
+.base {
+	margin:0px auto 0px auto;
+	padding:0px 0px 0px 0px;
+	width:<:SCREEN:>px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#ffffff;
+}
+.menu {
+	margin:-1px -1px -1px 0px;
+	padding:0px 0px 0px 0px;
+	width:<:MENU_WIDTH:>px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#<:$profile_sidebar_fill_color:>;
+}
+.menu .info {
+	margin:8px 8px 24px 4px;
+	padding:0px 0px 0px 0px;
+}
+.menu .info img {
+	margin:0px 0px 0px 0px;
+	padding:0px 0px 0px 0px;
+	width:48px;
+	height:48px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+}
+.menu .active {
+	margin:0px <:MENU_WIDTH - TAB_WIDTH:>px -1px -1px;
+	padding:3px 0px 3px 8px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+	border-left:solid 1px #ffffff;
+	background-color:#ffffff;
+}
+.menu .inactive {
+	margin:0px <:MENU_WIDTH - TAB_WIDTH:>px -1px -1px;
+	padding:3px 0px 3px 8px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#<:$profile_sidebar_fill_color:>;
+}
+.menu .conf {
+	margin:8px 8px 8px 8px;
+	padding:0px 0px 0px 0px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#ffffff;
+}
+.menu .calendar {
+	margin:8px 8px 8px 8px;
+	padding:0px 0px 0px 0px;
+}
+.menu .calendar th {
+	border-right:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+}
+.menu .calendar td {
+	background-color:#ffffff;
+}
+.main {
+	margin:0px 0px 0px 0px;
+	padding:8px 9px 0px 8px;
+	width:<:SCREEN - MENU_WIDTH - 19:>px;
+	background-color:#ffffff;
+}
+.main .queue {
+	margin:8px 8px 8px 8px;
+	padding:0px 0px 0px 0px;
+}
+.main .queue th {
+	border-right:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#<:$profile_sidebar_fill_color:>;
+}
+.main .queue td {
+	border-right:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#ffffff;
+}
+.main .analyze {
+	margin:8px 8px 8px 8px;
+	padding:0px 0px 0px 0px;
+}
+.main .analyze th {
+	border-right:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#<:$profile_sidebar_fill_color:>;
+}
+.main .analyze td {
+	border-right:solid 1px #<:$profile_sidebar_border_color:>;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#ffffff;
+}
+.main .search {
+	margin:0px 0px 0px 0px;
+	padding:8px 8px 8px 8px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#<:$profile_sidebar_fill_color:>;
+}
+.main .summary {
+	width:480px;
+}
+.main .summary h1 {
+	margin:8px 0px 0px 0px;
+	padding:16px 0px 16px 52px;
+	background-image:url("/img/twittotter48.png");
+	background-repeat:no-repeat;
+}
+.main .timeline .date {
+	margin:8px 0px 0px 0px;
+	padding:0px 8px 0px 8px;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+	background-color:#<:$profile_sidebar_fill_color:>;
+}
+.main .timeline .icon {
+	margin:3px 3px 3px 3px;
+	padding:0px 0px 0px 0px;
+	width:24px;
+	height:24px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+}
+.main .timeline .head {
+	margin:0px 0px 0px 0px;
+	padding:0px 0px 0px 4px;
+}
+.main .timeline .body {
+	margin:0px 0px 2px 0px;
+	padding:0px 0px 2px 8px;
+	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
+}
+.main .timeline .media {
+	margin:3px 3px 3px 3px;
+	padding:0px 0px 0px 0px;
+	width:128px;
+	height:78px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
+}
+.main .timeline .withmedia {
+	min-height:70px;
+}
+-->
+</style>
+</head>
+<body class="m">
+	<div class="base">
+		<div class="pile menu">
+			<div class="info">
+				<img class="pile" src="<:$profile_image_url_https:>" alt="<:$profile_image_url_https:>"/>
+				<span class=""><:$name:></span><br/>
+				&nbsp;<span class="s">@<:$screen_name:></span><br/>
+				&nbsp;<span class="s">#<:$id:></span><br/>
+			</div>
+			:if !$BORROW.IS_SHOW {
+			<div class="<:$GET.l == nil ? "active" : "inactive":>"><a class="" href="/">ついっとったー</a></div>
+			<div class="<:$GET.l == "notice" ? "active" : "inactive":>"><a class="" href="/?l=notice">おしらせ</a></div>
+			<div class="<:$GET.l == "history" ? "active" : "inactive":>"><a class="" href="/?l=history">こうしんないよう</a></div>
+			:}else{
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "t" ? "active" : "inactive":>"><a class="" href="/<:$screen_name:>/t">ついーと</a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "m" ? "active" : "inactive":>"><a class="" href="/<:$screen_name:>/m">@<:$screen_name:></a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "n" ? "active" : "inactive":>"><a class="" href="/<:$screen_name:>/n">@ した</a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "r" ? "active" : "inactive":>"><a class="" href="/<:$screen_name:>/r">りついっと した</a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "e" ? "active" : "inactive":>"><a class="" href="/<:$screen_name:>/e">りついっと された</a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "q" ? "active" : "inactive":>"><a class="" href="/<:$screen_name:>/q">くおとついっと した</a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "u" ? "active" : "inactive":>"><a class="" href="/<:$screen_name:>/u">くおとついっと した</a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "f" ? "active" : "inactive":>"><a class="" href="/<:$screen_name:>/f"><span class="yellow">&#9733;</span> した</a></div>
+			<div class="<:$BORROW.IS_SEARCH ? "active" : "inactive":>"><a class="" href="/<:$screen_name:>/s">けんさく</a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "o" ? "active" : "inactive":>"><a class="" href="/<:$screen_name:>/o">いろいろ</a></div>
+			<div class="<:!$BORROW.IS_SEARCH && $MATCH[3] == "j" ? "active" : "inactive":>"><a class="" href="/<:$screen_name:>/j">きゅー</a>&nbsp;(<span class=""><a class="help" href="#">?<span class="s">・きゅー<br/>管理者が困った時に見るページです。</span></a></span>)</div>
+			:}
+			<div class="conf s">
+				<span class="">表示設定</span>
+				<div class="">
+					<span class="<:$SES.v +& 1 ? "limegreen" : "red":>">&#9632;</span>
+					<span class=""><a class="" href="/<:$screen_name:>/c?v=1">画像表示</a></span>
+					&nbsp;(<span class=""><a class="help" href="#">?<span class="s">・画像表示<br/>展開可能な画像が含まれるツイートである場合、ツイートの横に画像をインライン展開して表示するか否かを決定します。</span></a></span>)
+				</div>
+				<div class="">
+					<span class="<:$SES.v +& 2 ? "limegreen" : "red":>">&#9632;</span>
+					<span class=""><a class="" href="/<:$screen_name:>/c?v=2">アイコン表示</a></span>
+					&nbsp;(<span class=""><a class="help" href="#">?<span class="s">・アイコン表示<br/>ツイートのオーナーであるユーザのプロフィール画像を表示するか否かを決定します。</span></a></span>)
+				</div>
+			</div>
+			<div class="calendar">
+				<table class="mid s cj">
+					<tr class="">
+						<th class=""><a class="" href="/<:$screen_name:>/<:$MATCH[3]:>/<:$BORROW.cal.m != 1 ? $BORROW.cal.y : $BORROW.cal.y - 1:>-<:$BORROW.cal.m != 1 ? $BORROW.cal.m - 1 : 12:>">&lt;</a></th>
+						<th class="" colspan="5"><:$BORROW.cal.y:>-<:$BORROW.cal.m:></th>
+						<th class=""><a class="" href="/<:$screen_name:>/<:$MATCH[3]:>/<:$BORROW.cal.m != 12 ? $BORROW.cal.y : $BORROW.cal.y + 1:>-<:$BORROW.cal.m != 12 ? $BORROW.cal.m + 1 : 1:>">&gt;</a></th>
+					</tr>
+					<tr class="">
+						<th class="n">日</th>
+						<th class="n">月</th>
+						<th class="n">火</th>
+						<th class="n">水</th>
+						<th class="n">木</th>
+						<th class="n">金</th>
+						<th class="n">土</th>
+					</tr>
+					:for calendar($BORROW.cal.m,$BORROW.cal.y) -> $i {
+					<tr class="">
+						:for $i -> $i {
+						:if $i != nil {
+						<td class=""><a class="" href="/<:$screen_name:>/<:$MATCH[3]:>/<:$BORROW.cal.y:>-<:$BORROW.cal.m:>-<:$i:>"><:$i:></a></td>
+						:}else{
+						<td class=""></td>
+						:}
+						:}
+					</tr>
+					:}
+				</table>
+			</div>
+			<div class="s">
+				<ul>
+					:for $archives -> $e {
+					<li><a href="/<:$screen_name:>/t/<:$e.created_at_ym:>"><:$e.created_at_ym:></a> (<:$e.i:>)</li>
+					:}
+				</ul>
+			</div>
+		</div>
+		<div class="pile main">
+			:if !$BORROW.IS_SEARCH && $MATCH[3] == "j" {
+			<div class="queue">
+				<table class="mid ss">
+					<tr class="">
+						<th class="s n cj">番号</th>
+						<th class="s n cj">登録時</th>
+						<th class="s n cj">実行時</th>
+						<th class="s n cj">内容</th>
+						<th class="s n cj">優先度</th>
+						<th class="s n cj" colspan="2">状態</th>
+					</tr>
+					:for $queue -> $queue {
+					<tr class="">
+						<td class="rj"><:$queue.id:></td>
+						<td class="cj"><:$queue.ctime:></td>
+						<td class="cj"><:$queue.mtime:></td>
+						<td class="lj"><:$queue.order:></td>
+						<td class="cj"><:$queue.priority:></td>
+						:if $queue.flag +& 1 {
+						<td class="cj">実行待</td>
+						:}elsif $queue.flag +& 2 {
+						<td class="cj">成功</td>
+						:}elsif $queue.flag +& 4 {
+						<td class="cj">失敗</td>
+						:}else{
+						<td class="cj">不明</td>
+						:}
+						<td class="rj"><:$queue.flag:></td>
+					</tr>
+					:}
+				</table>
+			</div>
+			:}elsif !$BORROW.IS_SEARCH && $MATCH[3] == "o" {
+			<div class="analyze">
+				<div class="">
+					<table class="mid s">
+						<tr class="">
+							<th class="" colspan="3">&nbsp;</th>
+						</tr>
+						<tr class="">
+							<td class="" rowspan="2" style="width:128px;"><img class="" src="<:$profile_image_url_https:>" alt="<:$profile_image_url_https:>"/></td>
+							<td class="" colspan="2"><span class=""><:$name:></span>&nbsp;<span class="s">@<:$screen_name:></span></td>
+						</tr>
+						<tr class="">
+							<td class="" colspan="2">
+								<span class="dimgray">場所:</span>&nbsp;<span class=""><:$location:></span><br/>
+								<span class="dimgray">URL:</span>&nbsp;<span class=""><:$url:></span><br/>
+								<span class="dimgray">自己紹介:</span>&nbsp;<span class=""><:$description:></span><br/>
+							</td>
+						</tr>
+						<tr class="">
+							<td class="lj">Twitter登録日</td>
+							<td class="lj">
+								<span class=""><:$created_at:></span>
+								<span class="s dimgray">&nbsp;-&nbsp;</span>
+								<span class="s dimgray">経過日数0日</span>
+								<span class="s dimgray">経過秒数0秒</span>
+							</td>
+							<td class="cj">-</td>
+						</tr>
+						<tr class="">
+							<td class="lj">ついーと</td>
+							<td class="lj"><span class=""><:$statuses_count:></span>件</td>
+							<td class="cj"><a class="" href="#">しょうさい</a></td>
+						</tr>
+						<tr class="">
+							<td class="lj">ふぉろう している</td>
+							<td class="lj"><span class=""><:$friends_count:></span>人</td>
+							<td class="cj"><a class="" href="#">しょうさい</a></td>
+						</tr>
+						<tr class="">
+							<td class="lj">ふぉろう されている</td>
+							<td class="lj"><span class=""><:$followers_count:></span>人</td>
+							<td class="cj"><a class="" href="#">しょうさい</a></td>
+						</tr>
+						<tr class="">
+							<td class="lj">ふぁぼ した</td>
+							<td class="lj"><span class=""><:$favourites_count:></span>件</td>
+							<td class="cj">-</td>
+						</tr>
+						<tr class="">
+							<td class="lj">りすと されている</td>
+							<td class="lj"><span class=""><:$listed_count:></span>人</td>
+							<td class="cj">-</td>
+						</tr>
+					</table>
+				</div>
+				<div class="cram">
+					<table class="mid s">
+						<tr class="">
+							<th class="n cj"></th>
+							<th class="n cj">送信</th>
+							<th class="n cj">受信</th>
+							<th class="n cj"></th>
+						</tr>
+						:for $twittotter.analyze.result_8704 -> $e {
+						:if $~e > 19 { last }
+						<tr class="">
+							<td class="lj"><a class="" href="https://twitter.com/#!/<:$e.screen_name:>" target="_blank">@<:$e.screen_name:></a></td>
+							<td class="rj"><:$e.i_8192:></td>
+							<td class="rj"><:$e.i_512:></td>
+							<td class="cj"><a class="" href="/<:$screen_name:>/mn/@<:$e.screen_name:>">いちらん</a></td>
+						</tr>
+						:}
+					</table>
+				</div>
+				<div class="cram">
+					<table class="mid s">
+						<tr class="">
+							<th class="n cj"></th>
+							<th class="n cj">回数</th>
+							<th class="n cj"></th>
+						</tr>
+						:for $twittotter.analyze.result_hash -> $e {
+						:if $~e > 19 { last }
+						<tr class="">
+							<td class="lj"><a class="" href="https://twitter.com/#!/search/<:"#" ~ $e.referred_hash|uri_escape:>" target="_blank">#<:omit($e.referred_hash,16):></a></td>
+							<td class="rj"><:$e.i:></td>
+							<td class="cj"><a class="" href="/<:$screen_name:>/t?grep=%23<:$e.referred_hash:>">いちらん</a></td>
+						</tr>
+						:}
+					</table>
+				</div>
+			</div>
+			:}else{
+			:if !$BORROW.IS_SHOW {
+			<div class="search">
+				&nbsp;*&nbsp;<a class="l b" href="/?op=login">ろぐいん/とうろく</a>&nbsp;<span class="dimgray s">(Twitterのアカウントが必要です。)</span><br/>
+				&nbsp;*&nbsp;<a class="l" href="/?op=logout">ろぐあうと</a>&nbsp;<span class="dimgray s">(Twitterのアカウントは必要ありません。)</span><br/>
+			</div>
+			:}else{
+			<div class="search s">
+				<form class="" method="get" action="/<:$screen_name:>/s">
+					<input class="" type="hidden" name="c" value="<:$MATCH[3]:>"/>
+					けんさく&nbsp;<input class="" type="text" size="48" name="grep" value="<:$GET.grep:>"/>
+					&nbsp;普通<input class="" type="radio" name="e" value="0"<:$GET.e ? "" : " checked=\"checked\""|raw:>/>
+					&nbsp;正規表現<input class="" type="radio" name="e" value="1"<:$GET.e ? " checked=\"checked\"" : ""|raw:>/>
+					&nbsp;<input class="" type="submit" name="" value="発動"/>
+					:if $BORROW.IS_SEARCH {
+					<table class="mid s">
+						<tr class="">
+							<td class="rj">ついっと</td>
+							<td class="lj"><input class="" type="checkbox" name="c" value="t"<:match($MATCH[3],"t") ? " checked=\"checked\"" : ""|raw:>/></td>
+							<td class="rj">ああああ</td>
+							<td class="lj"><input class="" type="checkbox" name="c" value="i"<:match($MATCH[3],"i") ? " checked=\"checked\"" : ""|raw:>/></td>
+							<td class="rj">&nbsp;&nbsp;</td>
+							<td class="rj">ひづけ</td>
+							<td class="rj">
+								<select class="" name="y-">
+									<option class="" value="">*</option>
+									:for [2006..$BORROW.y] -> $i {
+									<option class="" value="<:$i:>"<:$MATCH[5] == $i ? " selected=\"selected\"" : ""|raw:>><:$i:></option>
+									:}
+								</select>
+							</td>
+							<td class="rj">-</td>
+							<td class="rj">
+								<select class="" name="m-">
+									<option class="" value="">*</option>
+									:for [1..12] -> $i {
+									<option class="" value="<:$i:>"<:$MATCH[6] == $i ? " selected=\"selected\"" : ""|raw:>><:$i:></option>
+									:}
+								</select>
+							</td>
+							<td class="rj">-</td>
+							<td class="rj">
+								<select class="" name="d-">
+									<option class="" value="">*</option>
+									:for [1..31] -> $i {
+									<option class="" value="<:$i:>"<:$MATCH[7] == $i ? " selected=\"selected\"" : ""|raw:>><:$i:></option>
+									:}
+								</select>
+							</td>
+							<td class="rj">から</td>
+						</tr>
+						<tr class="">
+							<td class="rj">@<:$screen_name:></td>
+							<td class="lj"><input class="" type="checkbox" name="c" value="m"<:match($MATCH[3],"m") ? " checked=\"checked\"" : ""|raw:>/></td>
+							<td class="rj">@ した</td>
+							<td class="lj"><input class="" type="checkbox" name="c" value="n"<:match($MATCH[3],"n") ? " checked=\"checked\"" : ""|raw:>/></td>
+							<td class="rj">&nbsp;&nbsp;</td>
+							<td class="rj"></td>
+							<td class="rj">
+								<select class="" name="-y">
+									<option class="" value="">*</option>
+									:for [2006..$BORROW.y] -> $i {
+									<option class="" value="<:$i:>"<:$MATCH[9] == $i ? " selected=\"selected\"" : ""|raw:>><:$i:></option>
+									:}
+								</select>
+							</td>
+							<td class="rj">-</td>
+							<td class="rj">
+								<select class="" name="-m">
+									<option class="" value="">*</option>
+									:for [1..12] -> $i {
+									<option class="" value="<:$i:>"<:$MATCH[10] == $i ? " selected=\"selected\"" : ""|raw:>><:$i:></option>
+									:}
+								</select>
+							</td>
+							<td class="rj">-</td>
+							<td class="rj">
+								<select class="" name="-d">
+									<option class="" value="">*</option>
+									:for [1..31] -> $i {
+									<option class="" value="<:$i:>"<:$MATCH[11] == $i ? " selected=\"selected\"" : ""|raw:>><:$i:></option>
+									:}
+								</select>
+							</td>
+							<td class="rj">まで</td>
+						</tr>
+						</tr>
+						<tr class="">
+							<td class="rj">りついっと した</td>
+							<td class="lj"><input class="" type="checkbox" name="c" value="r"<:match($MATCH[3],"r") ? " checked=\"checked\"" : ""|raw:>/></td>
+							<td class="rj">りついっと された</td>
+							<td class="lj"><input class="" type="checkbox" name="c" value="e"<:match($MATCH[3],"e") ? " checked=\"checked\"" : ""|raw:>/></td>
+						</tr>
+						<tr class="">
+							<td class="rj">くおとついっと した</td>
+							<td class="lj"><input class="" type="checkbox" name="c" value="q"<:match($MATCH[3],"q") ? " checked=\"checked\"" : ""|raw:>/></td>
+							<td class="rj">くおとついっと された</td>
+							<td class="lj"><input class="" type="checkbox" name="c" value="u"<:match($MATCH[3],"u") ? " checked=\"checked\"" : ""|raw:>/></td>
+						</tr>
+						<tr class="">
+							<td class="rj"><span class="yellow">&#9733;</span> した</td>
+							<td class="lj"><input class="" type="checkbox" name="c" value="f"<:match($MATCH[3],"f") ? " checked=\"checked\"" : ""|raw:>/></td>
+							<td class="rj">未実装</td>
+							<td class="lj"><input class="" type="checkbox" name="c" value="a"<:match($MATCH[3],"a") ? " checked=\"checked\"" : ""|raw:>/></td>
+							<td class="rj">&nbsp;&nbsp;</td>
+							<td class="lj" colspan="7">
+								&nbsp;URLっぽい<input class="" type="checkbox" name="o" value="urlonly"<:match($GET.o,"urlonly") ? " checked=\"checked\"" : ""|raw:>/>
+								&nbsp;画像っぽい<input class="" type="checkbox" name="o" value="imgonly"<:match($GET.o,"imgonly") ? " checked=\"checked\"" : ""|raw:>/>
+								&nbsp;動画っぽい<input class="" type="checkbox" name="o" value="movonly"<:match($GET.o,"movonly") ? " checked=\"checked\"" : ""|raw:>/>
+							</td>
+						</tr>
+					</table>
+					:}
+				</form>
+			</div>
+			<div class="">
+				&nbsp;<span class="s">検索結果 <:$rows:> 件</span>
+			</div>
+			:}
+			:if !$BORROW.IS_SHOW && $GET.l == nil {
+			<div class="summary mid">
+				<h1 class="ll b">ツイートを保存して検索できるようになるだけ</h1>
+				<span class="">
+					<span class="b">ついっとったー(twittotter)</span>は残念ながら自分のツイートを保存して検索できるようになるだけの<span class="b">無料</span>サービスです。無料ゆえに保存して検索できるだけです。"t"が多くてタイプミスしやすいので気をつけて下さいね。<br />
+					<br />
+					登録するとどうなるのか、サンプルは<a href="/el1n">こちら</a><br />
+				</span>
+				<h2 class=""><span class="box">&nbsp;</span>保存できる</h2>
+				<span class="">自分のツイートの他に、りぷらいやふぁぼ、リツイートされた自分のツイートなど、関係のあるツイートを全て自動 的に保存します。また過去のツイートなども可能な限り遡って取得し保存します。たぶん。</span>
+				<h2 class=""><span class="box">&nbsp;</span>検索できる</h2>
+				<span class="">保存された自分と自分に関わるツイートはちょっとだけ詳細に検索できます。たぶん。普通のキーワード検索の他に……</span>
+				<ul>
+					<li>自分のツイートとりぷらいから、RTとQTから、などツイートの種類で検索できます。</li>
+					<li>日単位や月単位、日の範囲などのいつからいつまでを指定して検索できます。</li>
+					<li>POSIXっぽい<span class="spot">正規表現</span>でも検索できます。</li>
+					<li>URLっぽいツイート、画像が含まれてるっぽいツイート、動画が含まれてるっぽいツイートなど、それっぽく検索できます。</li>
+				</ul>
+				<h2 class=""><span class="box">&nbsp;</span>その他の機能</h2>
+				<span class="">画像が含まれてるっぽいツイートだと画像をツイートの横に展開して表示できます。たぶん。右側のメニューの"画像表示"で 表示の有無を切り替えることができます。</span>
+			</div>
+			:}else{
+			<div class="timeline">
+:for $status -> $e {
+:if $~e == 0 || $e.created_at_splited.d != $status[$~e - 1].created_at_splited.d {
+:#                              <div class="timeline_date"><a href="/<:$screen_name:>/<:$MATCH[3]:>/<:$e.created_at_splited.y:>-<:$e.created_at_splited.m:>-<:$e.created_at_splited.d:>"><:$e.created_at_splited.y:>-<:$e.created_at_splited.m:>-<:$e.created_at_splited.d:></a></div>
+<div class="date"><:$e.created_at_splited.y:>-<:$e.created_at_splited.m:>-<:$e.created_at_splited.d:></div>
+:}
+:if $SES.v +& 2 {
+<img class="cram icon" src="<:$e.user.profile_image_url_https:>" alt="<:$e.user.profile_image_url_https:>">
+:}
+:if $SES.v +& 1 {
+:for $e.entities.media -> $media {
+<a class="" href="<:$media.media_url:>"><img class="pile media" src="<:$media.thumb_url:>" alt="<:$media.media_url:>"></a>
+:}
+:}
+<div class="head">
+<a class="b dimgray" href="https://twitter.com/#!/<:$e.user.screen_name:>" target="_blank"><:$e.user.screen_name:></a>
+<span class="gray"><:$e.user.name:></span>
+<span class="ss silver"><:$e.created_at_formatted:></span>
+<a class="ss silver" href="https://twitter.com/#!/<:$e.user.screen_name:>/status/<:$e.id:>" target="_blank">#<:$e.id:></a>
+</div>
+<div class="body<:$SES.v +& 1 && $e.entities.media.size() > 0 ? " withmedia" : "":>">
+<span class="text"><:$e.text|raw:></span>
+</div>
+:}
+			</div>
+			<div class="">
+				<table class="ss cj mid">
+					<tr>
+						:for [1..($rows / 48) + 1] -> $i {
+						:if $i != 1 && $i % 30 == 1 {
+					</tr>
+					<tr>
+						:}
+						<td class="<:$i - 1 == $MATCH[12] ? "s b" : "":>"><a href="<:$BORROW.location:>/<:$i:>?<:$ENV.QUERY_STRING:>"><:$i:></a></td>
+						:}
+					</tr>
+				</table>
+			</div>
+			:}
+			:}
+		</div>
+		<div class="fall">
+		</div>
+	</div>
+</body>
+</html>

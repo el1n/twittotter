@@ -128,14 +128,23 @@ SALVAGE_12=SELECT `flag` FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 SALVAGE_13=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,3
 #SALVAGE_14=SELECT ?,`status_id` - 1 AS `status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` ASC LIMIT 0,1
 FOLLOW_0=SELECT 1 FROM `Follow` WHERE ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND `flag` & ? = ? LIMIT 0,1
+FOLLOW_1=SELECT 1 FROM `Follow` WHERE ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND `flag` & ? = ? LIMIT 0,1
 FOLLOW_2=INSERT `Follow` (`referring_user_id`,`referring_screen_name`,`referred_user_id`,`referred_screen_name`,`ctime`,`flag`) VALUES(?,?,?,?,CURRENT_TIMESTAMP,?)
+FOLLOW_3=INSERT `Follow` (`referred_user_id`,`referred_screen_name`,`referring_user_id`,`referring_screen_name`,`ctime`,`flag`) VALUES(?,?,?,?,CURRENT_TIMESTAMP,?)
 FOLLOW_4=UPDATE `Follow` SET `flag` = `flag` | ?,`ctime` = IF(`flag` & ?,`ctime`,CURRENT_TIMESTAMP),`dtime` = IF(`flag` & ?,0,`dtime`) WHERE ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND `flag` & ? = ?
+FOLLOW_5=UPDATE `Follow` SET `flag` = `flag` | ?,`ctime` = IF(`flag` & ?,`ctime`,CURRENT_TIMESTAMP),`dtime` = IF(`flag` & ?,0,`dtime`) WHERE ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND `flag` & ? = ?
 FOLLOW_6=UPDATE `Follow` SET `flag` = `flag` & ? | IF(`flag` & ?,?,0) WHERE ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND `flag` & ? = ?
+FOLLOW_7=UPDATE `Follow` SET `flag` = `flag` & ? | IF(`flag` & ?,?,0) WHERE ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND `flag` & ? = ?
 FOLLOW_8=UPDATE `Follow` SET `dtime` = CURRENT_TIMESTAMP WHERE ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND `flag` & ? = 0 AND `dtime` = '0000-00-00 00:00:00'
+FOLLOW_9=UPDATE `Follow` SET `dtime` = CURRENT_TIMESTAMP WHERE ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND `flag` & ? = 0 AND `dtime` = '0000-00-00 00:00:00'
 ANALYZE_0=SELECT DATE_FORMAT(`created_at`,'%Y-%m') as `created_at_ym`,COUNT(*) as `i` FROM `Tweet` WHERE `user_id` = ? OR `screen_name` = ? GROUP BY `created_at_ym` ORDER BY `created_at_ym` DESC
 ANALYZE_1=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referring_screen_name` ORDER BY `i` DESC
 ANALYZE_2=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referred_screen_name` ORDER BY `i` DESC
 ANALYZE_3=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND `referred_hash` IS NOT NULL GROUP BY `referred_hash` ORDER BY `i` DESC LIMIT 0,20
+ANALYZE_4=SELECT * FROM `Follow` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND ADDDATE(`ctime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
+ANALYZE_5=SELECT * FROM `Follow` WHERE (`referred_user_id` = ? OR `referring_screen_name` = ?) AND ADDDATE(`ctime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
+ANALYZE_6=SELECT * FROM `Follow` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND ADDDATE(`dtime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
+ANALYZE_7=SELECT * FROM `Follow` WHERE (`referred_user_id` = ? OR `referring_screen_name` = ?) AND ADDDATE(`dtime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
 
 INDEX_0=INSERT `Token` (`user_id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`,`ctime`) VALUES(?,?,?,?,CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE `ACCESS_TOKEN` = ?,`ACCESS_TOKEN_SECRET` = ?
 INDEX_1=SELECT DISTINCT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` RIGHT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE (`Bind`.`referring_screen_name` = ? OR `Bind`.`referring_screen_name` = ?) AND `Bind`.`referred_hash` LIKE ? AND `Tweet`.`flag` & ? = ? AND `Tweet`.`flag` & ? = 0 ORDER BY `Tweet`.`created_at` DESC
@@ -345,7 +354,7 @@ given(shift(@ARGV)){
 				#&new_queue($user_id,$screen_name,"COMPARE.FAVORITE",I_PRIORITY_HIGH,0,F_FAVORITES);
 				#&new_queue($user_id,$screen_name,"NULL.TEST",I_PRIORITY_HIGH,0,0);
 				#&new_queue($user_id,$screen_name,"ANALYZE",I_PRIORITY_LOW,0,0);
-				&new_queue($user_id,$screen_name,"FETCH.FOLLOWING",I_PRIORITY_HIGH,0,F_FOLLOWING);
+				&new_queue($user_id,$screen_name,"FETCH.FOLLOWED",I_PRIORITY_HIGH,0,F_FOLLOWED);
 			}
 			return($user_id);
 		}
@@ -1132,6 +1141,11 @@ sub r3_processer
 			# http://ux.nu/*
 			# URL短縮サービスが死んでどうすんだアホ
 			$code = -1;
+		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.news-postseven\.com\/archives\//io){
+			# http://www.news-postseven.com/archives/*
+			$code = -1;
+		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^https:\/\/store\.unity3d\.com\//io){
+			$code = -1;
 		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/\/112.78.197.156\//io){
 			# http:///112.78.197.156/*
 			# http://volac.net/aup/img/の404からLocation: http:///112.78.197.156/aflink/link.cgi?page=a404で302のクズ、"/"が3つある
@@ -1346,7 +1360,7 @@ sub follow
 			$cursor = $B->{Cache::Memcached}->get($sign) || -1;
 			$i = 1;
 
-			if(!($r = $B->{Net::Twitter}->friends_ids({id =>$user_id,cursor =>$cursor}))){
+			if(!($r = $B->{Net::Twitter}->followers_ids({id =>$user_id,cursor =>$cursor}))){
 				warn();
 				return(-1);
 			}
@@ -1468,6 +1482,19 @@ sub analyze
 		$r->{"result_hash"} = $B->{DBT_ANALYZE_3}->fetchall_arrayref({});
 	}
 
+	if($B->{DBT_ANALYZE_4}->execute($user_id,$screen_name)){
+		$r->{"following"} = $B->{DBT_ANALYZE_4}->fetchall_arrayref({});
+	}
+	if($B->{DBT_ANALYZE_5}->execute($user_id,$screen_name)){
+		$r->{"followed"} = $B->{DBT_ANALYZE_5}->fetchall_arrayref({});
+	}
+	if($B->{DBT_ANALYZE_6}->execute($user_id,$screen_name)){
+		$r->{"removing"} = $B->{DBT_ANALYZE_6}->fetchall_arrayref({});
+	}
+	if($B->{DBT_ANALYZE_7}->execute($user_id,$screen_name)){
+		$r->{"removed"} = $B->{DBT_ANALYZE_7}->fetchall_arrayref({});
+	}
+
 	my $sign = join(".",$C->{_}->{CACHE_NAMESPACE},$screen_name).".";
 	$B->{Cache::Memcached}->set($sign."analyze",$r,$C->{Cache}->{PROFILE_EXPIRE});
 
@@ -1534,9 +1561,9 @@ sub cb_index
 				screen_name =>undef,
 				status =>[],
 			};
-			if($GET{l} =~ /^(info|history)$/io){
+			if($GET{l} =~ /^(notice|history)$/io){
 				my $hash = {
-					info =>"twittotter%",
+					notice =>"twittotter%",
 					history =>"twittotter_history",
 				}->{$GET{l}};
 				if($B->{DBT_INDEX_1}->execute(qw(el1n xmms),$hash,F_REGULAR | F_TWEETS,F_REGULAR | F_TWEETS,F_RETWEETS) == 0){
@@ -1546,7 +1573,7 @@ sub cb_index
 			}
 		}
 
-		return("Text::Xslate",$r // {},file =>"core.Xslate");
+		return("Text::Xslate",$r // {},file =>"main.Xslate");
 	}elsif($GET{op} eq "login" && $GET{oauth_token} && $GET{oauth_verifier}){
 		$B->{Net::Twitter}->request_token($SES{REQUEST_TOKEN});
 		$B->{Net::Twitter}->request_token_secret($SES{REQUEST_TOKEN_SECRET});
@@ -1802,8 +1829,8 @@ sub cb_show
 					a =>[3,[0,1,4,5],F_FAVORITES],
 					i =>[2,[0,1,4,5],F_TIMELINE],
 					t_ =>[1,[0,1],F_TWEETS],
-					m_ =>[22,[0,1,2,3,4],F_REPLIES|F_REPLIED],
-					n_ =>[21,[0,1,2,3,4],F_REPLYTO|F_REPLIED],
+					m_ =>[22,[0,1,2,3,4],F_REPLIES|F_REPLYTO|F_REPLIED],
+					n_ =>[21,[0,1,2,3,4],F_REPLIES|F_REPLYTO|F_REPLIED],
 					r_ =>[2,[0,1,4,5],F_RETWEETS],
 					e_ =>[3,[0,1,4,5],F_RETWEETED],
 					q_ =>[2,[0,1,4,5],F_QUOTETWEETS],
@@ -1865,5 +1892,5 @@ sub cb_show
 		$r->{rows} = 0;
 	}
 
-	return($issue ? $issue : "Text::Xslate",$r // {},file =>"core.Xslate");
+	return($issue ? $issue : "Text::Xslate",$r // {},file =>"main.Xslate");
 }
