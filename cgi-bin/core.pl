@@ -110,6 +110,8 @@ CLI_R5_0=SELECT * FROM `Tweet` WHERE `revision` = 4 ORDER BY `created_at` DESC L
 CLI_R5_1=UPDATE `Tweet` SET `text` = ?,`structure` = ?,`revision` = 5 WHERE `status_id` = ?
 CLI_R5_2=UPDATE `Tweet` SET `revision` = 5 WHERE `status_id` = ?
 CLI_R7_0=SELECT * FROM `Tweet` ORDER BY `created_at` DESC
+CLI_R8_0=SELECT * FROM `Tweet` WHERE `revision` < 8 ORDER BY `created_at` DESC
+CLI_R8_1=UPDATE `Tweet` SET `text` = ?,`revision` = 8 WHERE `status_id` = ?
 CLI_SD_0=SELECT * FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 
 SALVAGE_0=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,1
@@ -616,6 +618,20 @@ given(shift(@ARGV)){
 					die($r->{status_id});
 				}
 				printf("Converted %d.\n",@{$r}{qw(status_id)});
+			}
+		}
+	}
+	when("-u8"){
+		if($B->{DBT_CLI_R8_0}->execute() != 0){
+			while(my $r = unpack_structure($B->{DBT_CLI_R8_0}->fetchrow_hashref())){
+				if($r->{text} ne $r->{structure}->{twittotter}->{text_deployed}){
+					if($B->{DBT_CLI_R8_1}->execute($r->{structure}->{twittotter}->{text_deployed},@{$r}{qw(status_id)}) == 0){
+						die($r->{status_id});
+					}
+					printf("Converted %d.\n",@{$r}{qw(status_id)});
+				}else{
+					printf("Skip %d.\n",@{$r}{qw(status_id)});
+				}
 			}
 		}
 	}
