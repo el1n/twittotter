@@ -1506,6 +1506,7 @@ sub follow
 			$screen_name,
 			$screen_name,
 			$flag & (F_FOLLOWING | F_FOLLOWED),
+			$flag & (F_FOLLOWING | F_FOLLOWED),
 			F_SYNCHRONIZED,
 		) == 0){
 			#return(-1);
@@ -1552,16 +1553,16 @@ sub analyze
 		$r->{"result_hash"} = $B->{DBT_ANALYZE_3}->fetchall_arrayref({});
 	}
 
-	if($B->{DBT_ANALYZE_4}->execute($user_id,$screen_name,F_FOLLOWING)){
+	if($B->{DBT_ANALYZE_4}->execute($user_id,$screen_name,F_FOLLOWING,F_FOLLOWING)){
 		$r->{"following"} = $B->{DBT_ANALYZE_4}->fetchall_arrayref({});
 	}
-	if($B->{DBT_ANALYZE_5}->execute($user_id,$screen_name,F_FOLLOWED)){
+	if($B->{DBT_ANALYZE_5}->execute($user_id,$screen_name,F_FOLLOWED,F_FOLLOWED)){
 		$r->{"followed"} = $B->{DBT_ANALYZE_5}->fetchall_arrayref({});
 	}
-	if($B->{DBT_ANALYZE_6}->execute($user_id,$screen_name,F_FOLLOWING)){
+	if($B->{DBT_ANALYZE_6}->execute($user_id,$screen_name,F_FOLLOWING,F_FOLLOWING)){
 		$r->{"removing"} = $B->{DBT_ANALYZE_6}->fetchall_arrayref({});
 	}
-	if($B->{DBT_ANALYZE_7}->execute($user_id,$screen_name,F_FOLLOWED)){
+	if($B->{DBT_ANALYZE_7}->execute($user_id,$screen_name,F_FOLLOWED,F_FOLLOWED)){
 		$r->{"removed"} = $B->{DBT_ANALYZE_7}->fetchall_arrayref({});
 	}
 
