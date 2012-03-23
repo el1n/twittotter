@@ -98,6 +98,7 @@ CLI_QE_0=SELECT * FROM `Queue` LEFT JOIN `Token` ON `Queue`.`user_id` = `Token`.
 CLI_QE_1=UPDATE `Queue` SET `flag` = ?,`mtime` = CURRENT_TIMESTAMP WHERE `id` = ?
 CLI_QE_2=UPDATE `Queue` SET `id` = LAST_INSERT_ID(`id`),`atime` = DATE_ADD(CURRENT_TIMESTAMP,INTERVAL 15 MINUTE) WHERE `atime` <= CURRENT_TIMESTAMP AND `flag` & 1 ORDER BY `priority` DESC,`ctime` ASC LIMIT 1
 CLI_QE_3=SELECT * FROM `Queue` LEFT JOIN `Token` ON `Queue`.`user_id` = `Token`.`user_id` WHERE `Queue`.`id` = LAST_INSERT_ID()
+CLI_QE_4=SELECT `user_id` FROM `Profile` WHERE `screen_name` IS NULL OR `profile_image_url_https` IS NULL LIMIT 0,20
 CLI_R1_0=SELECT * FROM `Tweet` WHERE `revision` = 0 LIMIT 0,1
 CLI_R2_0=SELECT * FROM `Tweet` LEFT JOIN `Token` ON `Tweet`.`user_id` = `Token`.`user_id` WHERE `Tweet`.`revision` = 1 LIMIT 0,1
 CLI_R2_1=UPDATE `Tweet` SET `revision` = 2 WHERE `status_id` = ?
@@ -129,6 +130,7 @@ SALVAGE_11=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_a
 SALVAGE_12=SELECT `flag` FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 SALVAGE_13=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,3
 #SALVAGE_14=SELECT ?,`status_id` - 1 AS `status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` ASC LIMIT 0,1
+R9PROC_0=INSERT `Profile` (`user_id`,`screen_name`,`profile_image_url_https`) VALUES(?,?,?) ON DUPLICATE KEY UPDATE `screen_name` = IFNULL(VALUES(`screen_name`),`screen_name`),`profile_image_url_https` = IFNULL(VALUES(`profile_image_url_https`),`profile_image_url_https`)
 FOLLOW_0=SELECT 1 FROM `Follow` WHERE ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND `flag` & ? = ? LIMIT 0,1
 FOLLOW_1=SELECT 1 FROM `Follow` WHERE ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND `flag` & ? = ? LIMIT 0,1
 FOLLOW_2=INSERT `Follow` (`referring_user_id`,`referring_screen_name`,`referred_user_id`,`referred_screen_name`,`ctime`,`flag`) VALUES(?,?,?,?,CURRENT_TIMESTAMP,?)
@@ -143,10 +145,10 @@ ANALYZE_0=SELECT DATE_FORMAT(`created_at`,'%Y-%m') as `created_at_ym`,COUNT(*) a
 ANALYZE_1=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referring_screen_name` ORDER BY `i` DESC
 ANALYZE_2=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referred_screen_name` ORDER BY `i` DESC
 ANALYZE_3=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND `referred_hash` IS NOT NULL GROUP BY `referred_hash` ORDER BY `i` DESC LIMIT 0,20
-ANALYZE_4=SELECT * FROM `Follow` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND ADDDATE(`ctime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
-ANALYZE_5=SELECT * FROM `Follow` WHERE (`referred_user_id` = ? OR `referring_screen_name` = ?) AND ADDDATE(`ctime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
-ANALYZE_6=SELECT * FROM `Follow` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND ADDDATE(`dtime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
-ANALYZE_7=SELECT * FROM `Follow` WHERE (`referred_user_id` = ? OR `referring_screen_name` = ?) AND ADDDATE(`dtime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
+ANALYZE_4=SELECT * FROM `Follow` LEFT JOIN `Profile` ON `Follow`.`referred_user_id` = `Profile`.`user_id` WHERE (`Follow`.`referring_user_id` = ? OR `Follow`.`referring_screen_name` = ?) AND ADDDATE(`Follow`.`ctime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
+ANALYZE_5=SELECT * FROM `Follow` LEFT JOIN `Profile` ON `Follow`.`referring_user_id` = `Profile`.`user_id` WHERE (`Follow`.`referred_user_id` = ? OR `Follow`.`referred_screen_name` = ?) AND ADDDATE(`Follow`.`ctime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
+ANALYZE_6=SELECT * FROM `Follow` LEFT JOIN `Profile` ON `Follow`.`referred_user_id` = `Profile`.`user_id` WHERE (`Follow`.`referring_user_id` = ? OR `Follow`.`referring_screen_name` = ?) AND ADDDATE(`Follow`.`dtime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
+ANALYZE_7=SELECT * FROM `Follow` LEFT JOIN `Profile` ON `Follow`.`referring_user_id` = `Profile`.`user_id` WHERE (`Follow`.`referred_user_id` = ? OR `Follow`.`referred_screen_name` = ?) AND ADDDATE(`Follow`.`dtime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
 
 INDEX_0=INSERT `Token` (`user_id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`,`ctime`) VALUES(?,?,?,?,CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE `ACCESS_TOKEN` = ?,`ACCESS_TOKEN_SECRET` = ?
 INDEX_1=SELECT DISTINCT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` RIGHT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE (`Bind`.`referring_screen_name` = ? OR `Bind`.`referring_screen_name` = ?) AND `Bind`.`referred_hash` LIKE ? AND `Tweet`.`flag` & ? = ? AND `Tweet`.`flag` & ? = 0 ORDER BY `Tweet`.`created_at` DESC
@@ -356,6 +358,8 @@ given(shift(@ARGV)){
 				#&new_queue($user_id,$screen_name,"COMPARE.FAVORITE",I_PRIORITY_HIGH,0,F_FAVORITES);
 				#&new_queue($user_id,$screen_name,"NULL.TEST",I_PRIORITY_HIGH,0,0);
 				#&new_queue($user_id,$screen_name,"ANALYZE",I_PRIORITY_LOW,0,0);
+				#&new_queue($user_id,$screen_name,"LOOKUP.PROFILE",I_PRIORITY_LOW,0,0);
+				&new_queue($user_id,$screen_name,"FETCH.FOLLOWING",I_PRIORITY_HIGH,0,F_FOLLOWING);
 				&new_queue($user_id,$screen_name,"FETCH.FOLLOWED",I_PRIORITY_HIGH,0,F_FOLLOWED);
 			}
 			return($user_id);
@@ -508,6 +512,18 @@ given(shift(@ARGV)){
 						flag =>$r->{flag} & (F_FOLLOWING | F_FOLLOWED),
 					},
 				);
+
+				@{$r}{qw(priority atime)} = (I_PRIORITY_LOW,3600);
+				&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
+				&new_queue(@{$r}{qw(user_id screen_name order priority atime flag)});
+			}
+			when(/^LOOKUP\.PROFILE/o){
+				if(($i = $B->{DBT_CLI_QE_4}->execute()) != 0){
+					for(@{$B->{Net::Twitter}->lookup_users({user_id =>[map{$_->[0]}@{$B->{DBT_CLI_QE_4}->fetchall_arrayref()}]}) || []}){
+						if(!&insprofile($_)){
+						}
+					}
+				}
 
 				@{$r}{qw(priority atime)} = (I_PRIORITY_LOW,3600);
 				&mod_queue($r->{id},($r->{flag} & ~F_STATE) | ($i >= 0 ? F_FINISH : F_FAILURE));
@@ -1019,6 +1035,12 @@ sub salvage
 			warn("r7_processer error.");
 			return(-1);
 		}
+		#if(!&r8_processer($structure,$flag)){
+		#	return(-1);
+		#}
+		if(!&r9_processer($structure,$flag)){
+			return(-1);
+		}
 
 		for(@flag){
 			$flag |= $_;
@@ -1345,6 +1367,36 @@ sub r7_processer
 	return(1);
 }
 
+sub r8_processer
+{
+	my $structure = shift();
+	my $flag = shift();
+
+	return(1);
+}
+
+sub r9_processer
+{
+	sub insprofile
+	{
+		my $structure = shift();
+
+		return($structure->{id} > 0 && $B->{DBT_R9PROC_0}->execute(@{$structure}{qw(id screen_name profile_image_url_https)}) != 0 ? 1 : 0);
+	}
+
+	my $structure = shift();
+	my $flag = shift();
+
+	$structure = $structure->{twitter};
+
+	for($structure->{user},$structure->{retweeted_status}->{user},@{$structure->{retweeted_by}}){
+		if(!&insprofile($_)){
+		}
+	}
+
+	return(1);
+}
+
 sub follow
 {
 	my $q = shift();
@@ -1431,6 +1483,7 @@ sub follow
 				return(-1);
 			}
 		}
+		&insprofile({id =>$referred_user_id});
 	}
 
 	if($r->{next_cursor} == 0){
@@ -1615,10 +1668,10 @@ sub cb_index
 				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
 			}elsif(!&new_queue($SES{user_id},$SES{screen_name},"ANALYZE",I_PRIORITY_LOW,0,F_QUEUE)){
 				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
-			#}elsif(!&new_queue($SES{user_id},$SES{screen_name},"FETCH.FOLLOWING",I_PRIORITY_MIDIUM,0,F_QUEUE|F_FOLLOWING)){
-			#	return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
-			#}elsif(!&new_queue($SES{user_id},$SES{screen_name},"FETCH.FOLLOWED",I_PRIORITY_MIDIUM,0,F_QUEUE|F_FOLLOWED)){
-			#	return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
+			}elsif(!&new_queue($SES{user_id},$SES{screen_name},"FETCH.FOLLOWING",I_PRIORITY_MIDIUM,0,F_QUEUE|F_FOLLOWING)){
+				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
+			}elsif(!&new_queue($SES{user_id},$SES{screen_name},"FETCH.FOLLOWED",I_PRIORITY_MIDIUM,0,F_QUEUE|F_FOLLOWED)){
+				return(&cb_exception(undef,undef,undef,{msg =>"認証失敗"}));
 			}
 			return("jump","http://".$ENV{HTTP_HOST}.$ENV{SCRIPT_NAME}."/".$SES{screen_name});
 		}else{
@@ -1670,6 +1723,11 @@ sub cb_show
 	$m->[11] //= defined($m->[8]) ? undef : $GET{"-d"} || $m->[7];
 	$m->[8] //= $m->[3] =~ /s/o ? "-" : undef;
 	$m->[12] = $m->[12] < 1 ? 0 : $m->[12] - 1;
+	for(qw(5 6 7 9 10 11 12)){
+		if(defined($m->[$_])){
+			$m->[$_] = int($m->[$_]);
+		}
+	}
 	my $d = shift();
 	my $g = shift();
 	my($location,$screen_name,$issue,$clause,@g) = @{$m};

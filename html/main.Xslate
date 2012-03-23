@@ -186,6 +186,9 @@ a.help:hover span {
 	margin:8px 8px 8px 8px;
 	padding:0px 0px 0px 0px;
 }
+.main .analyze table {
+	width:560px;
+}
 .main .analyze th {
 	border-right:solid 1px #<:$profile_sidebar_border_color:>;
 	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
@@ -195,6 +198,19 @@ a.help:hover span {
 	border-right:solid 1px #<:$profile_sidebar_border_color:>;
 	border-bottom:solid 1px #<:$profile_sidebar_border_color:>;
 	background-color:#ffffff;
+}
+.main .analyze th.noborder,.main .analyze td.noborder {
+	width:16px;
+	border-right:solid 0px #ffffff;
+	border-bottom:solid 0px #ffffff;
+	background-color:#ffffff;
+}
+.main .analyze img {
+	margin:0px 0px 0px 0px;
+	padding:0px 0px 0px 0px;
+	width:32px;
+	height:32px;
+	border:solid 1px #<:$profile_sidebar_border_color:>;
 }
 .main .search {
 	margin:0px 0px 0px 0px;
@@ -410,40 +426,95 @@ a.help:hover span {
 						</tr>
 					</table>
 				</div>
-				<div class="cram">
+				<div class="">
 					<table class="mid s">
 						<tr class="">
-							<th class="n cj"></th>
+							<th class="n cj">なまえ</th>
 							<th class="n cj">送信</th>
 							<th class="n cj">受信</th>
 							<th class="n cj"></th>
+							<th class="noborder"></th>
+							<th class="n cj">はっしゅ</th>
+							<th class="n cj">回数</th>
+							<th class="n cj"></th>
 						</tr>
-						:for $twittotter.analyze.result_8704 -> $e {
-						:if $~e > 19 { last }
+						:for [0..19] -> $i {
 						<tr class="">
-							<td class="lj"><a class="" href="https://twitter.com/#!/<:$e.screen_name:>" target="_blank">@<:$e.screen_name:></a></td>
-							<td class="rj"><:$e.i_8192:></td>
-							<td class="rj"><:$e.i_512:></td>
-							<td class="cj"><a class="" href="/<:$screen_name:>/mn/@<:$e.screen_name:>">いちらん</a></td>
+							:if $twittotter.analyze.result_8704[$i] {
+							<td class="lj"><a class="" href="https://twitter.com/#!/<:$twittotter.analyze.result_8704[$i].screen_name:>" target="_blank">@<:$twittotter.analyze.result_8704[$i].screen_name:></a></td>
+							<td class="rj"><:$twittotter.analyze.result_8704[$i].i_8192:></td>
+							<td class="rj"><:$twittotter.analyze.result_8704[$i].i_512:></td>
+							<td class="cj"><a class="" href="/<:$screen_name:>/mn/@<:$twittotter.analyze.result_8704[$i].screen_name:>">いちらん</a></td>
+							:}else{
+							<td class=""></td>
+							<td class=""></td>
+							<td class=""></td>
+							<td class=""></td>
+							:}
+							<td class="noborder"></td>
+							:if $twittotter.analyze.result_hash[$i] {
+							<td class="lj"><a class="" href="https://twitter.com/#!/search/<:"#" ~ $twittotter.analyze.result_hash[$i].referred_hash|uri_escape:>" target="_blank">#<:omit($twittotter.analyze.result_hash[$i].referred_hash,16):></a></td>
+							<td class="rj"><:$twittotter.analyze.result_hash[$i].i:></td>
+							<td class="cj"><a class="" href="/<:$screen_name:>/t?grep=%23<:$twittotter.analyze.result_hash[$i].referred_hash:>">いちらん</a></td>
+							:}else{
+							<td class=""></td>
+							<td class=""></td>
+							<td class=""></td>
+							:}
 						</tr>
 						:}
 					</table>
 				</div>
-				<div class="cram">
+				<div class="">
 					<table class="mid s">
 						<tr class="">
-							<th class="n cj"></th>
-							<th class="n cj">回数</th>
-							<th class="n cj"></th>
+							<th class="n cj">ふぉろうした (最近一週間)</th>
+							<th class="n cj">ふぉろうされた (最近一週間)</th>
 						</tr>
-						:for $twittotter.analyze.result_hash -> $e {
-						:if $~e > 19 { last }
 						<tr class="">
-							<td class="lj"><a class="" href="https://twitter.com/#!/search/<:"#" ~ $e.referred_hash|uri_escape:>" target="_blank">#<:omit($e.referred_hash,16):></a></td>
-							<td class="rj"><:$e.i:></td>
-							<td class="cj"><a class="" href="/<:$screen_name:>/t?grep=%23<:$e.referred_hash:>">いちらん</a></td>
+							<td class="">
+								:for $twittotter.analyze.following -> $e {
+								<a class="help" href="https://twitter.com/#!/<:$e.referred_screen_name:>" target="_blank">
+								<img class="icon" src="<:$e.profile_image_url_https:>" alt="<:$e.profile_image_url_https:>"/>
+								<span class="">@<:$e.referred_screen_name:><br/>#<:$e.referred_user_id:><br/></span>
+								</a>
+								:}
+							</td>
+							<td class="">
+								:for $twittotter.analyze.followed -> $e {
+								<a class="help" href="https://twitter.com/#!/<:$e.referring_screen_name:>" target="_blank">
+								<img class="icon" src="<:$e.profile_image_url_https:>" alt="<:$e.profile_image_url_https:>"/>
+								<span class="">@<:$e.referring_screen_name:><br/>#<:$e.referring_user_id:><br/></span>
+								</a>
+								:}
+							</td>
 						</tr>
-						:}
+					</table>
+				</div>
+				<div class="">
+					<table class="mid s">
+						<tr class="">
+							<th class="n cj">りむーぶした (最近一週間)</th>
+							<th class="n cj">りむーぶされた (最近一週間)</th>
+						</tr>
+						<tr class="">
+							<td class="">
+								:for $twittotter.analyze.removing -> $e {
+								<a class="help" href="https://twitter.com/#!/<:$e.referred_screen_name:>" target="_blank">
+								<img class="icon" src="<:$e.profile_image_url_https:>" alt="<:$e.profile_image_url_https:>"/>
+								<span class="">@<:$e.referred_screen_name:><br/>#<:$e.referred_user_id:><br/></span>
+								</a>
+								:}
+							</td>
+							<td class="">
+								:for $twittotter.analyze.removed -> $e {
+								<a class="help" href="https://twitter.com/#!/<:$e.referring_screen_name:>" target="_blank">
+								<img class="icon" src="<:$e.profile_image_url_https:>" alt="<:$e.profile_image_url_https:>"/>
+								<span class="">@<:$e.referring_screen_name:><br/>#<:$e.referring_user_id:><br/></span>
+								</a>
+								:}
+							</td>
+						</tr>
 					</table>
 				</div>
 			</div>
@@ -589,29 +660,29 @@ a.help:hover span {
 			</div>
 			:}else{
 			<div class="timeline">
-:for $status -> $e {
-:if $~e == 0 || $e.created_at_splited.d != $status[$~e - 1].created_at_splited.d {
-:#                              <div class="timeline_date"><a href="/<:$screen_name:>/<:$MATCH[3]:>/<:$e.created_at_splited.y:>-<:$e.created_at_splited.m:>-<:$e.created_at_splited.d:>"><:$e.created_at_splited.y:>-<:$e.created_at_splited.m:>-<:$e.created_at_splited.d:></a></div>
-<div class="date"><:$e.created_at_splited.y:>-<:$e.created_at_splited.m:>-<:$e.created_at_splited.d:></div>
-:}
-:if $SES.v +& 2 {
-<img class="cram icon" src="<:$e.user.profile_image_url_https:>" alt="<:$e.user.profile_image_url_https:>">
-:}
-:if $SES.v +& 1 {
-:for $e.entities.media -> $media {
-<a class="" href="<:$media.media_url:>"><img class="pile media" src="<:$media.thumb_url:>" alt="<:$media.media_url:>"></a>
-:}
-:}
-<div class="head">
-<a class="b dimgray" href="https://twitter.com/#!/<:$e.user.screen_name:>" target="_blank"><:$e.user.screen_name:></a>
-<span class="gray"><:$e.user.name:></span>
-<span class="ss silver"><:$e.created_at_formatted:></span>
-<a class="ss silver" href="https://twitter.com/#!/<:$e.user.screen_name:>/status/<:$e.id:>" target="_blank">#<:$e.id:></a>
-</div>
-<div class="body<:$SES.v +& 1 && $e.entities.media.size() > 0 ? " withmedia" : "":>">
-<span class="text"><:$e.text|raw:></span>
-</div>
-:}
+				:for $status -> $e {
+				:if $~e == 0 || $e.created_at_splited.d != $status[$~e - 1].created_at_splited.d {
+				:#                              <div class="timeline_date"><a href="/<:$screen_name:>/<:$MATCH[3]:>/<:$e.created_at_splited.y:>-<:$e.created_at_splited.m:>-<:$e.created_at_splited.d:>"><:$e.created_at_splited.y:>-<:$e.created_at_splited.m:>-<:$e.created_at_splited.d:></a></div>
+				<div class="date"><:$e.created_at_splited.y:>-<:$e.created_at_splited.m:>-<:$e.created_at_splited.d:></div>
+				:}
+				:if $SES.v +& 2 {
+				<img class="cram icon" src="<:$e.user.profile_image_url_https:>" alt="<:$e.user.profile_image_url_https:>">
+				:}
+				:if $SES.v +& 1 {
+				:for $e.entities.media -> $media {
+				<a class="" href="<:$media.media_url:>"><img class="pile media" src="<:$media.thumb_url:>" alt="<:$media.media_url:>"></a>
+				:}
+				:}
+				<div class="head">
+					<a class="b dimgray" href="https://twitter.com/#!/<:$e.user.screen_name:>" target="_blank"><:$e.user.screen_name:></a>
+					<span class="gray"><:$e.user.name:></span>
+					<span class="ss silver"><:$e.created_at_formatted:></span>
+					<a class="ss silver" href="https://twitter.com/#!/<:$e.user.screen_name:>/status/<:$e.id:>" target="_blank">#<:$e.id:></a>
+				</div>
+				<div class="body<:$SES.v +& 1 && $e.entities.media.size() > 0 ? " withmedia" : "":>">
+					<span class="text"><:$e.text|raw:></span>
+				</div>
+				:}
 			</div>
 			<div class="">
 				<table class="ss cj mid">
