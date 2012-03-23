@@ -139,16 +139,16 @@ FOLLOW_4=UPDATE `Follow` SET `flag` = `flag` | ?,`ctime` = IF(`flag` & ?,`ctime`
 FOLLOW_5=UPDATE `Follow` SET `flag` = `flag` | ?,`ctime` = IF(`flag` & ?,`ctime`,CURRENT_TIMESTAMP),`dtime` = IF(`flag` & ?,0,`dtime`) WHERE ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND `flag` & ? = ?
 FOLLOW_6=UPDATE `Follow` SET `flag` = `flag` & ? | IF(`flag` & ?,?,0) WHERE ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND `flag` & ? = ?
 FOLLOW_7=UPDATE `Follow` SET `flag` = `flag` & ? | IF(`flag` & ?,?,0) WHERE ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND `flag` & ? = ?
-FOLLOW_8=UPDATE `Follow` SET `dtime` = CURRENT_TIMESTAMP WHERE ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND `flag` & ? = 0 AND `dtime` = '0000-00-00 00:00:00'
-FOLLOW_9=UPDATE `Follow` SET `dtime` = CURRENT_TIMESTAMP WHERE ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND `flag` & ? = 0 AND `dtime` = '0000-00-00 00:00:00'
+FOLLOW_8=UPDATE `Follow` SET `dtime` = CURRENT_TIMESTAMP WHERE ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND `flag` & ? = ? AND `flag` & ? = 0 AND `dtime` = '0000-00-00 00:00:00'
+FOLLOW_9=UPDATE `Follow` SET `dtime` = CURRENT_TIMESTAMP WHERE ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND `flag` & ? = ? AND `flag` & ? = 0 AND `dtime` = '0000-00-00 00:00:00'
 ANALYZE_0=SELECT DATE_FORMAT(`created_at`,'%Y-%m') as `created_at_ym`,COUNT(*) as `i` FROM `Tweet` WHERE `user_id` = ? OR `screen_name` = ? GROUP BY `created_at_ym` ORDER BY `created_at_ym` DESC
 ANALYZE_1=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referred_user_id` = ? OR `referred_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referring_screen_name` ORDER BY `i` DESC
 ANALYZE_2=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND `flag` & ? = ? GROUP BY `referred_screen_name` ORDER BY `i` DESC
 ANALYZE_3=SELECT *,COUNT(*) as `i` FROM `Bind` WHERE (`referring_user_id` = ? OR `referring_screen_name` = ?) AND `referred_hash` IS NOT NULL GROUP BY `referred_hash` ORDER BY `i` DESC LIMIT 0,20
-ANALYZE_4=SELECT * FROM `Follow` LEFT JOIN `Profile` ON `Follow`.`referred_user_id` = `Profile`.`user_id` WHERE (`Follow`.`referring_user_id` = ? OR `Follow`.`referring_screen_name` = ?) AND ADDDATE(`Follow`.`ctime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
-ANALYZE_5=SELECT * FROM `Follow` LEFT JOIN `Profile` ON `Follow`.`referring_user_id` = `Profile`.`user_id` WHERE (`Follow`.`referred_user_id` = ? OR `Follow`.`referred_screen_name` = ?) AND ADDDATE(`Follow`.`ctime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
-ANALYZE_6=SELECT * FROM `Follow` LEFT JOIN `Profile` ON `Follow`.`referred_user_id` = `Profile`.`user_id` WHERE (`Follow`.`referring_user_id` = ? OR `Follow`.`referring_screen_name` = ?) AND ADDDATE(`Follow`.`dtime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
-ANALYZE_7=SELECT * FROM `Follow` LEFT JOIN `Profile` ON `Follow`.`referring_user_id` = `Profile`.`user_id` WHERE (`Follow`.`referred_user_id` = ? OR `Follow`.`referred_screen_name` = ?) AND ADDDATE(`Follow`.`dtime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
+ANALYZE_4=SELECT * FROM `Follow` LEFT JOIN `Profile` ON `Follow`.`referred_user_id` = `Profile`.`user_id` WHERE (`Follow`.`referring_user_id` = ? OR `Follow`.`referring_screen_name` = ?) AND `Follow`.`flag` & ? = ? AND ADDDATE(`Follow`.`ctime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
+ANALYZE_5=SELECT * FROM `Follow` LEFT JOIN `Profile` ON `Follow`.`referring_user_id` = `Profile`.`user_id` WHERE (`Follow`.`referred_user_id` = ? OR `Follow`.`referred_screen_name` = ?) AND `Follow`.`flag` & ? = ? AND ADDDATE(`Follow`.`ctime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
+ANALYZE_6=SELECT * FROM `Follow` LEFT JOIN `Profile` ON `Follow`.`referred_user_id` = `Profile`.`user_id` WHERE (`Follow`.`referring_user_id` = ? OR `Follow`.`referring_screen_name` = ?) AND `Follow`.`flag` & ? = ? AND ADDDATE(`Follow`.`dtime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
+ANALYZE_7=SELECT * FROM `Follow` LEFT JOIN `Profile` ON `Follow`.`referring_user_id` = `Profile`.`user_id` WHERE (`Follow`.`referred_user_id` = ? OR `Follow`.`referred_screen_name` = ?) AND `Follow`.`flag` & ? = ? AND ADDDATE(`Follow`.`dtime`,INTERVAL 7 DAY) > CURRENT_TIMESTAMP LIMIT 0,10
 
 INDEX_0=INSERT `Token` (`user_id`,`screen_name`,`ACCESS_TOKEN`,`ACCESS_TOKEN_SECRET`,`ctime`) VALUES(?,?,?,?,CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE `ACCESS_TOKEN` = ?,`ACCESS_TOKEN_SECRET` = ?
 INDEX_1=SELECT DISTINCT `Tweet`.`status_id`,`Tweet`.`structure` FROM `Tweet` RIGHT JOIN `Bind` ON `Tweet`.`status_id` = `Bind`.`status_id` WHERE (`Bind`.`referring_screen_name` = ? OR `Bind`.`referring_screen_name` = ?) AND `Bind`.`referred_hash` LIKE ? AND `Tweet`.`flag` & ? = ? AND `Tweet`.`flag` & ? = 0 ORDER BY `Tweet`.`created_at` DESC
@@ -1505,6 +1505,7 @@ sub follow
 			$user_id,
 			$screen_name,
 			$screen_name,
+			$flag & (F_FOLLOWING | F_FOLLOWED),
 			F_SYNCHRONIZED,
 		) == 0){
 			#return(-1);
@@ -1551,16 +1552,16 @@ sub analyze
 		$r->{"result_hash"} = $B->{DBT_ANALYZE_3}->fetchall_arrayref({});
 	}
 
-	if($B->{DBT_ANALYZE_4}->execute($user_id,$screen_name)){
+	if($B->{DBT_ANALYZE_4}->execute($user_id,$screen_name,F_FOLLOWING)){
 		$r->{"following"} = $B->{DBT_ANALYZE_4}->fetchall_arrayref({});
 	}
-	if($B->{DBT_ANALYZE_5}->execute($user_id,$screen_name)){
+	if($B->{DBT_ANALYZE_5}->execute($user_id,$screen_name,F_FOLLOWED)){
 		$r->{"followed"} = $B->{DBT_ANALYZE_5}->fetchall_arrayref({});
 	}
-	if($B->{DBT_ANALYZE_6}->execute($user_id,$screen_name)){
+	if($B->{DBT_ANALYZE_6}->execute($user_id,$screen_name,F_FOLLOWING)){
 		$r->{"removing"} = $B->{DBT_ANALYZE_6}->fetchall_arrayref({});
 	}
-	if($B->{DBT_ANALYZE_7}->execute($user_id,$screen_name)){
+	if($B->{DBT_ANALYZE_7}->execute($user_id,$screen_name,F_FOLLOWED)){
 		$r->{"removed"} = $B->{DBT_ANALYZE_7}->fetchall_arrayref({});
 	}
 
