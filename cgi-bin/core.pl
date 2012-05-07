@@ -1213,6 +1213,12 @@ sub r3_processer
 		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/d\.hatena\.ne\.jp\//io){
 			# プライベートモードによる403
 			$code = -1;
+		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/4Gamer\.net/io){
+			$code = -1;
+		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/s2\.storage\.gehirn\.jp\//io){
+			$code = -1;
+		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/i\.softbank\.jp\//io){
+			$code = -1;
 		}
 		if($code == 200){
 			$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
