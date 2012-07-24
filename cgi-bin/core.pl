@@ -1219,6 +1219,18 @@ sub r3_processer
 			$code = -1;
 		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/i\.softbank\.jp\//io){
 			$code = -1;
+		}elsif($code == 503 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/showyou41\.dyndns\.org\//io){
+			$code = -1;
+		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/SANSPO\.COM/io){
+			$code = -1;
+		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/m\.twitter\.net/io){
+			$code = -1;
+		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/mopera\.net/io){
+			$code = -1;
+		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/TDL\.whois-servers\.net/io){
+			$code = -1;
+		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/romancing\.saga\.jp/io){
+			$code = -1;
 		}
 		if($code == 200){
 			$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
