@@ -130,6 +130,9 @@ SALVAGE_11=INSERT `Tweet` (`status_id`,`user_id`,`screen_name`,`text`,`created_a
 SALVAGE_12=SELECT `flag` FROM `Tweet` WHERE `status_id` = ? LIMIT 0,1
 SALVAGE_13=SELECT ?,`status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` DESC LIMIT 0,3
 #SALVAGE_14=SELECT ?,`status_id` - 1 AS `status_id` FROM `Tweet` WHERE `user_id` = ? AND `flag` & ? = ? ORDER BY `status_id` ASC LIMIT 0,1
+R3PROC_0=SELECT `Fail` FROM `Spider` WHERE `URL` = ? AND `Status` = ? LIMIT 0,1
+R3PROC_1=UPDATE `Spider` SET `Fail` = `Fail` + 1 WHERE `URL` = ? AND `Status` = ?
+R3PROC_2=INSERT `Spider` (`URL`,`Status`,`Fail`) VALUES(?,?,1)
 R9PROC_0=INSERT `Profile` (`user_id`,`screen_name`,`profile_image_url_https`) VALUES(?,?,?) ON DUPLICATE KEY UPDATE `screen_name` = IFNULL(VALUES(`screen_name`),`screen_name`),`profile_image_url_https` = IFNULL(VALUES(`profile_image_url_https`),`profile_image_url_https`)
 FOLLOW_0=SELECT 1 FROM `Follow` WHERE ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND `flag` & ? = ? LIMIT 0,1
 FOLLOW_1=SELECT 1 FROM `Follow` WHERE ((? IS NOT NULL AND `referred_user_id` = ?) OR (? IS NOT NULL AND `referred_screen_name` = ?)) AND ((? IS NOT NULL AND `referring_user_id` = ?) OR (? IS NOT NULL AND `referring_screen_name` = ?)) AND `flag` & ? = ? LIMIT 0,1
@@ -1159,79 +1162,96 @@ sub r3_processer
 		$_->{expanded_url} //= $_->{url} =~ /^[a-z]+:\/\//o ? $_->{url} : "http://".$_->{url};
 
 		my($code,undef,undef,undef) = $B->{BlackCurtain::Fragility}->spider($_->{expanded_url},"none");
-		if($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/bgm-fes\.jp\//io){
-			# http://bgm-fes.jp/
-			# 正常なHTMLを常に HTTP/1.1 503 Service Unavailable で応答してくる糞サイト、死ぬべき
-			$code = -1;
-		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.toranoana\.jp\//io){
-			# http://www.toranoana.jp/*
-			# 年齢認証で403を返す、アホ？
-			$code = -1;
-		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/lockerz.com\//io){
-			# http://lockerz.com/*
-			# すぐ500吐くゴミ鯖
-			$code = -1;
-		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/hatsukari\.2ch\.at\//io){
-			# http://hatsukari.2ch.at/*
-			# 常に500のゴミ鯖、だがLWP/UAのConnection Timeoutでは？
-			$code = -1;
-		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/ux\.nu\//io){
-			# http://ux.nu/*
-			# URL短縮サービスが死んでどうすんだアホ
-			$code = -1;
-		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.news-postseven\.com\/archives\//io){
-			# http://www.news-postseven.com/archives/*
-			$code = -1;
-		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^https:\/\/store\.unity3d\.com\//io){
-			$code = -1;
-		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/\/112.78.197.156\//io){
-			# http:///112.78.197.156/*
-			# http://volac.net/aup/img/の404からLocation: http:///112.78.197.156/aflink/link.cgi?page=a404で302のクズ、"/"が3つある
-			$code = -2;
-		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.robotentertainment\.com\/games\/orcsmustdie/io){
-			# http://www.robotentertainment.com/games/orcsmustdie
-			# Fragility側の問題による403
-			$code = -1;
-		}elsif($code == 502 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/am6\.jp\//io){
-			# http://am6.jp/*
-			# 非携帯端末からのアクセスを拒否している？
-			$code = -1;
-		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.pfsense\.com\/packages\/config\//io){
-			# http://www.pfsense.com/packages/config/
-			# pfsenseのパッケージは別のところに移動している
-			$code = -1;
-		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/en\.expreview\.com\//io){
-			# http://en.expreview.com/*
-			# Fragility側の問題による403
-			$code = -1;
-		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/twitter.com\/.+?\/photo\//io){
-			# 非公開アカウントの画像は常に403
-			$code = -1;
-		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.youtube\.com\/watch/io){
-			# 削除された動画は常に403
-			$code = -1;
-		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/d\.hatena\.ne\.jp\//io){
-			# プライベートモードによる403
-			$code = -1;
-		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/4Gamer\.net/io){
-			$code = -1;
-		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/s2\.storage\.gehirn\.jp\//io){
-			$code = -1;
-		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/i\.softbank\.jp\//io){
-			$code = -1;
-		}elsif($code == 503 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/showyou41\.dyndns\.org\//io){
-			$code = -1;
-		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/SANSPO\.COM/io){
-			$code = -1;
-		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/m\.twitter\.net/io){
-			$code = -1;
-		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/mopera\.net/io){
-			$code = -1;
-		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/TDL\.whois-servers\.net/io){
-			$code = -1;
-		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/romancing\.saga\.jp/io){
-			$code = -1;
+		if($code != 200){
+			my $i = 0;
+			if($B->{DBT_R3PROC_0}->execute($B->{BlackCurtain::Fragility}->{s}->request()->uri(),$code) != 0){
+				$i = ($B->{DBT_R3PROC_0}->fetchrow_array())[0] + 1;
+				$B->{DBT_R3PROC_1}->execute($B->{BlackCurtain::Fragility}->{s}->request()->uri(),$code);
+			}else{
+				$i = 1;
+				$B->{DBT_R3PROC_2}->execute($B->{BlackCurtain::Fragility}->{s}->request()->uri(),$code);
+			}
+
+			if($i < 4){
+				warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code."(".$i.")");
+				return();
+			}
+			warn("Failed spider ".$_->{expanded_url}." -> ".$B->{BlackCurtain::Fragility}->{s}->request()->uri().", returned ".$code."(".$i.")");
 		}
+
+#		if($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/bgm-fes\.jp\//io){
+#			# http://bgm-fes.jp/
+#			# 正常なHTMLを常に HTTP/1.1 503 Service Unavailable で応答してくる糞サイト、死ぬべき
+#			$code = -1;
+#		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.toranoana\.jp\//io){
+#			# http://www.toranoana.jp/*
+#			# 年齢認証で403を返す、アホ？
+#			$code = -1;
+#		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/lockerz.com\//io){
+#			# http://lockerz.com/*
+#			# すぐ500吐くゴミ鯖
+#			$code = -1;
+#		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/hatsukari\.2ch\.at\//io){
+#			# http://hatsukari.2ch.at/*
+#			# 常に500のゴミ鯖、だがLWP/UAのConnection Timeoutでは？
+#			$code = -1;
+#		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/ux\.nu\//io){
+#			# http://ux.nu/*
+#			# URL短縮サービスが死んでどうすんだアホ
+#			$code = -1;
+#		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.news-postseven\.com\/archives\//io){
+#			# http://www.news-postseven.com/archives/*
+#			$code = -1;
+#		}elsif($B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^https:\/\/store\.unity3d\.com\//io){
+#			$code = -1;
+#		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/\/112.78.197.156\//io){
+#			# http:///112.78.197.156/*
+#			# http://volac.net/aup/img/の404からLocation: http:///112.78.197.156/aflink/link.cgi?page=a404で302のクズ、"/"が3つある
+#			$code = -2;
+#		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.robotentertainment\.com\/games\/orcsmustdie/io){
+#			# http://www.robotentertainment.com/games/orcsmustdie
+#			# Fragility側の問題による403
+#			$code = -1;
+#		}elsif($code == 502 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/am6\.jp\//io){
+#			# http://am6.jp/*
+#			# 非携帯端末からのアクセスを拒否している？
+#			$code = -1;
+#		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.pfsense\.com\/packages\/config\//io){
+#			# http://www.pfsense.com/packages/config/
+#			# pfsenseのパッケージは別のところに移動している
+#			$code = -1;
+#		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/en\.expreview\.com\//io){
+#			# http://en.expreview.com/*
+#			# Fragility側の問題による403
+#			$code = -1;
+#		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/twitter.com\/.+?\/photo\//io){
+#			# 非公開アカウントの画像は常に403
+#			$code = -1;
+#		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/www\.youtube\.com\/watch/io){
+#			# 削除された動画は常に403
+#			$code = -1;
+#		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/d\.hatena\.ne\.jp\//io){
+#			# プライベートモードによる403
+#			$code = -1;
+#		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/4Gamer\.net/io){
+#			$code = -1;
+#		}elsif($code == 403 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/s2\.storage\.gehirn\.jp\//io){
+#			$code = -1;
+#		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/i\.softbank\.jp\//io){
+#			$code = -1;
+#		}elsif($code == 503 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/showyou41\.dyndns\.org\//io){
+#			$code = -1;
+#		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/SANSPO\.COM/io){
+#			$code = -1;
+#		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/m\.twitter\.net/io){
+#			$code = -1;
+#		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/mopera\.net/io){
+#			$code = -1;
+#		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/TDL\.whois-servers\.net/io){
+#			$code = -1;
+#		}elsif($code == 500 && $B->{BlackCurtain::Fragility}->{s}->request()->uri() =~ /^http:\/\/romancing\.saga\.jp/io){
+#			$code = -1;
+#		}
 		if($code == 200){
 			$_->{expanded_url} = ${$B->{BlackCurtain::Fragility}->{s}->request()->uri()};
 			$structure->{twittotter}->{text_deployed} =~s/\Q$_->{url}\E/$_->{expanded_url}/g;
